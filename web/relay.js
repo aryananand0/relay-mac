@@ -3,9 +3,9 @@
 // ---- Tuning -------------------------------------------------------------
 // Pointer acceleration, shaped like the Mac's: slow finger = 1:1-ish precision,
 // fast flick = big jumps, with a smooth S-curve in between (no sudden kick).
-//   gain = SENSITIVITY * (GAIN_SLOW + (GAIN_FAST - GAIN_SLOW) * smoothstep(speed between SPEED_SLOW and SPEED_FAST))
-// Speeds are finger speed in CSS px per ms. Raise SENSITIVITY to make everything faster.
-const SENSITIVITY = 1.0;
+//   gain = settings.speed * (GAIN_SLOW + (GAIN_FAST - GAIN_SLOW) * smoothstep(speed between SPEED_SLOW and SPEED_FAST))
+// Speeds are finger speed in CSS px per ms. Cursor speed, scroll speed and
+// scroll direction are user settings (the gear button), stored on the phone.
 const GAIN_SLOW = 1.2;         // precise placement (text, small buttons)
 const GAIN_FAST = 7.0;         // a quick swipe crosses a 1920 px TV in about two strokes
 const SPEED_SLOW = 0.05;
@@ -16,15 +16,24 @@ const TAP_MAX_TRAVEL = 10;     // px of finger travel allowed in a tap
 const DOUBLE_CLICK_MS = 350;   // second tap within this window is a double-click
 const DRAG_WINDOW_MS = 300;    // touch down this soon after a tap, then move = drag
 const DRAG_START_TRAVEL = 6;   // px the second touch must move before the drag starts
+const SWIPE_DISTANCE = 45;     // px three or four fingers must travel to trigger a swipe
 
-const SCROLL_GAIN = 1.6;       // Mac scroll pixels per finger px
-const NATURAL_SCROLL = true;   // content follows your fingers, like a Mac trackpad
+const SCROLL_GAIN = 1.6;       // Mac scroll pixels per finger px at scroll speed 1
 const MOMENTUM_TAU_MS = 400;   // momentum decay time constant (bigger = glides longer)
 const MOMENTUM_MIN_SPEED = 0.25; // px/ms of finger speed needed at lift-off to glide
 const MOMENTUM_STALE_MS = 80;  // fingers resting this long before lift = no glide
 
 const CONTROL_PORT = 8766;
 const CODE_KEY = "relay.pairingCode";
+
+// ---- Settings (stored on the phone) ------------------------------------------
+const SETTINGS_KEY = "relay.settings";
+const DEFAULT_SETTINGS = { speed: 1, scroll: 1, natural: true };
+const settings = (() => {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; }
+  catch { return { ...DEFAULT_SETTINGS }; }
+})();
+function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
 
 // ---- Elements -----------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -84,8 +93,16 @@ function setStatus(state, text) {
     offlineTimer = null;
     offline.hidden = true;
   } else if (!offlineTimer && offline.hidden) {
-    offlineTimer = setTimeout(() => { offline.hidden = false; }, OFFLINE_AFTER_MS);
+    offlineTimer = setTimeout(() => showOffline(), OFFLINE_AFTER_MS);
   }
+}
+
+const OFFLINE_TITLE = "Can't reach your Mac";
+const OFFLINE_DETAIL = "Check that your Mac is awake and your iPhone is on the same Wi‑Fi.";
+function showOffline(title = OFFLINE_TITLE, detail = OFFLINE_DETAIL) {
+  offline.querySelector("strong").textContent = title;
+  offline.querySelector("span").textContent = detail;
+  offline.hidden = false;
 }
 
 function connect(immediate) {
@@ -122,6 +139,10 @@ function connect(immediate) {
         break;
       case "v":
         showVolume(parts);
+        break;
+      case "paused":
+        setStatus("bad", "Paused on your Mac");
+        showOffline("Relay is paused on your Mac", "Turn it back on from the Relay icon in the Mac's menu bar.");
         break;
       case "P": {
         lastPong = performance.now();
@@ -191,7 +212,7 @@ function flushMove() { flush("m"); }
 
 /// Finger delta → wheel delta. With natural scrolling the content follows the fingers.
 function queueScroll(fingerDx, fingerDy) {
-  const k = SCROLL_GAIN * (NATURAL_SCROLL ? 1 : -1);
+  const k = SCROLL_GAIN * settings.scroll * (settings.natural ? 1 : -1);
   queue("s", fingerDx * k, fingerDy * k);
 }
 
@@ -239,7 +260,9 @@ function click(button) {
 //   tap, then touch+move  drag (left button held until the finger lifts)
 //   two fingers           scroll, with momentum on a flick
 //   two-finger tap        right-click
-let gesture = null;   // { startedAt, maxFingers, travel, dragCandidate, dragging, scrolled }
+//   3–4 fingers           swipe like a MacBook: ←/→ switch desktops and full-screen apps,
+//                         ↑ Mission Control, ↓ the current app's windows (App Exposé)
+let gesture = null;   // { startedAt, maxFingers, travel, dragCandidate, dragging, scrolled, swipeFrom, swiped }
 let track = null;     // the finger driving the cursor: { id, x, y, t }
 let pair = null;      // two-finger centroid: { x, y, t, n }
 let speed = 0;        // smoothed one-finger speed, px/ms
@@ -256,7 +279,7 @@ function centroid(list, t) {
 
 function pointerGain(speed) {
   const t = Math.min(Math.max((speed - SPEED_SLOW) / (SPEED_FAST - SPEED_SLOW), 0), 1);
-  return SENSITIVITY * (GAIN_SLOW + (GAIN_FAST - GAIN_SLOW) * t * t * (3 - 2 * t));
+  return settings.speed * (GAIN_SLOW + (GAIN_FAST - GAIN_SLOW) * t * t * (3 - 2 * t));
 }
 
 pad.addEventListener("touchstart", (e) => {
@@ -267,7 +290,7 @@ pad.addEventListener("touchstart", (e) => {
     gesture = {
       startedAt: e.timeStamp, maxFingers: 0, travel: 0,
       dragCandidate: fingers === 1 && e.timeStamp - lastTapAt < DRAG_WINDOW_MS,
-      dragging: false, scrolled: false,
+      dragging: false, scrolled: false, swipeFrom: null, swiped: false,
     };
   }
   gesture.maxFingers = Math.max(gesture.maxFingers, fingers);
@@ -284,6 +307,13 @@ pad.addEventListener("touchmove", (e) => {
   e.preventDefault();
   if (!gesture) return;
   const touches = e.targetTouches;
+
+  if (touches.length >= 3 && !gesture.dragging) {
+    trackSwipe(centroid(touches, e.timeStamp));
+    return;
+  }
+  // Once three fingers have been down, lifting back to two never scrolls.
+  if (gesture.maxFingers >= 3 && !gesture.dragging) return;
 
   if (touches.length >= 2 && !gesture.dragging) {
     const c = centroid(touches, e.timeStamp);
@@ -329,6 +359,36 @@ pad.addEventListener("touchmove", (e) => {
   queue("m", dx * gain, dy * gain);
 }, { passive: false });
 
+// Mac shortcuts behind the multi-finger swipes (System Settings › Keyboard ›
+// Keyboard Shortcuts › Mission Control; all on by default). Directions follow the
+// MacBook: fingers moving left bring in the desktop on the right.
+const SWIPES = {
+  left: "k right ctrl",    // next desktop / full-screen app
+  right: "k left ctrl",    // previous desktop / full-screen app
+  up: "k up ctrl",         // Mission Control
+  down: "k down ctrl",     // App Exposé
+};
+
+function trackSwipe(c) {
+  if (!gesture.swipeFrom || gesture.swipeFrom.n !== c.n) {
+    // (Re)start measuring when the finger count changes, so fingers landing
+    // one after another don't read as movement.
+    gesture.swipeFrom = c;
+    stopMomentum();
+    return;
+  }
+  if (gesture.swiped) return;   // one action per swipe, like the Mac
+  const dx = c.x - gesture.swipeFrom.x, dy = c.y - gesture.swipeFrom.y;
+  if (Math.hypot(dx, dy) < SWIPE_DISTANCE) return;
+  const direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+  gesture.swiped = true;
+  gesture.travel = Infinity;    // never a tap
+  lastClick.button = -1;
+  flushMove();
+  send(SWIPES[direction]);
+  ripple(false);
+}
+
 function endTouch(e) {
   e.preventDefault();
   if (!gesture) return;
@@ -336,7 +396,7 @@ function endTouch(e) {
 
   // Leaving two-finger mode: flick into momentum if the fingers were still moving.
   if (pair && remaining < 2) {
-    if (gesture.scrolled && e.timeStamp - pair.t < MOMENTUM_STALE_MS) {
+    if (gesture.scrolled && gesture.maxFingers < 3 && e.timeStamp - pair.t < MOMENTUM_STALE_MS) {
       flush("s");
       startMomentum(scrollVelocity.x, scrollVelocity.y);
     }
@@ -350,8 +410,8 @@ function endTouch(e) {
     gesture.travel < TAP_MAX_TRAVEL && e.timeStamp - gesture.startedAt < TAP_MAX_MS;
   if (gesture.dragging) {
     send("u 0 1");
-  } else if (isTap) {
-    const right = gesture.maxFingers >= 2;
+  } else if (isTap && gesture.maxFingers <= 2) {
+    const right = gesture.maxFingers === 2;
     click(right ? 1 : 0);
     ripple(right);
     lastTapAt = right ? -Infinity : e.timeStamp;
@@ -590,6 +650,45 @@ for (const el of toolbar.querySelectorAll("button")) {
   el.addEventListener("touchcancel", release, { passive: false });
 }
 
+// ---- Settings sheet -----------------------------------------------------
+const sheet = $("settings"), settingsButton = $("btn-settings");
+const speedInput = $("set-speed"), scrollInput = $("set-scroll"), naturalInput = $("set-natural");
+const speedValue = $("set-speed-value"), scrollValue = $("set-scroll-value");
+
+function renderSettings() {
+  speedInput.value = settings.speed;
+  scrollInput.value = settings.scroll;
+  naturalInput.checked = settings.natural;
+  speedValue.textContent = `${Math.round(settings.speed * 100)}%`;
+  scrollValue.textContent = `${Math.round(settings.scroll * 100)}%`;
+}
+
+function openSettings() {
+  if (document.activeElement === kbInput) kbInput.blur();
+  renderSettings();
+  sheet.hidden = false;
+}
+function closeSettings() { sheet.hidden = true; }
+
+settingsButton.addEventListener("click", openSettings);
+$("settings-done").addEventListener("click", closeSettings);
+sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings(); });
+speedInput.addEventListener("input", () => { settings.speed = Number(speedInput.value); saveSettings(); renderSettings(); });
+scrollInput.addEventListener("input", () => { settings.scroll = Number(scrollInput.value); saveSettings(); renderSettings(); });
+naturalInput.addEventListener("change", () => { settings.natural = naturalInput.checked; saveSettings(); });
+$("settings-reset").addEventListener("click", () => {
+  Object.assign(settings, DEFAULT_SETTINGS);
+  saveSettings();
+  renderSettings();
+});
+$("settings-hints").addEventListener("click", () => {
+  try { localStorage.removeItem(HINT_KEY); } catch {}
+  hint.hidden = false;
+  hint.classList.remove("gone");
+  setMode("trackpad");
+  closeSettings();
+});
+
 // ---- Modes: Trackpad / Remote --------------------------------------------
 const MODE_KEY = "relay.mode";
 const trackpadView = $("trackpad"), remoteView = $("remote");
@@ -667,6 +766,9 @@ function showVolume(parts) {
 
 // Block pinch-zoom and page rubber-banding everywhere except the pairing form.
 document.addEventListener("gesturestart", (e) => e.preventDefault());
-document.addEventListener("touchmove", (e) => { if (pairing.hidden) e.preventDefault(); }, { passive: false });
+// The pairing form and the settings sliders need normal touch handling.
+document.addEventListener("touchmove", (e) => {
+  if (pairing.hidden && sheet.hidden) e.preventDefault();
+}, { passive: false });
 
 connect(true);

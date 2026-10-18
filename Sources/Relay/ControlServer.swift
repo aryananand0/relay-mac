@@ -1,10 +1,11 @@
 import Foundation
 import Network
+import SystemConfiguration
 
 /// WebSocket endpoint the iPhone sends input commands to.
 ///
 /// Protocol: one space-separated text message per command.
-///   a <code>        authenticate (must be first)      → "ok" | "no"
+///   a <code>        authenticate (must be first)      → "ok" | "no" | "paused"
 ///   m <dx> <dy>     move cursor by points (already accelerated by the client)
 ///   s <dx> <dy>     scroll by pixels, wheel convention (positive = content moves down/right)
 ///   c <btn> <n>     click button (0 left, 1 right) with click count n
@@ -31,6 +32,19 @@ final class ControlServer {
     /// Held only while a phone is connected: opts out of App Nap so input is
     /// delivered on time, while still allowing the Mac to idle-sleep.
     private var activity: NSObjectProtocol?
+    /// While paused, phones are told so and disconnected (e.g. on someone else's Wi-Fi).
+    private var paused = false
+    /// Called on the control queue whenever the number of connected phones changes.
+    var onControllersChanged: ((Int) -> Void)?
+
+    /// Thread-safe: hops onto the control queue.
+    func setPaused(_ value: Bool) {
+        queue.async { [self] in
+            paused = value
+            Log.info(value ? "control: paused" : "control: resumed")
+            if value { for session in sessions.values { session.close(saying: "paused") } }
+        }
+    }
 
     init(port: UInt16, queue: DispatchQueue, pairing: Pairing, input: InputInjector,
          keyboard: KeyboardInjector) throws {
@@ -42,6 +56,17 @@ final class ControlServer {
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         ws.maximumMessageSize = 4096
+        // Browsers always send Origin. Only Relay's own page (served from this Mac on the
+        // web port) may open the control socket, so other web pages can't even try codes.
+        let webPort = port - 1
+        ws.setClientRequestHandler(queue) { _, headers in
+            let origin = headers.first { $0.name.lowercased() == "origin" }?.value
+            guard let origin else { return .init(status: .accept, subprotocol: nil) }  // non-browser client
+            let allowed = ControlServer.allowedOrigins(webPort: webPort)
+            if allowed.contains(origin.lowercased()) { return .init(status: .accept, subprotocol: nil) }
+            Log.info("control: rejected WebSocket from origin \(origin)")
+            return .init(status: .reject, subprotocol: nil)
+        }
         params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
 
         listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
@@ -49,6 +74,12 @@ final class ControlServer {
         self.pairing = pairing
         self.input = input
         self.keyboard = keyboard
+    }
+
+    static func allowedOrigins(webPort: UInt16) -> Set<String> {
+        var hosts = ["localhost", "127.0.0.1", "[::1]"] + PeerPolicy.localIPv4Addresses()
+        if let name = SCDynamicStoreCopyLocalHostName(nil) as String? { hosts.append("\(name).local") }
+        return Set(hosts.map { "http://\($0):\(webPort)".lowercased() })
     }
 
     func start() {
@@ -79,6 +110,7 @@ final class ControlServer {
 
     fileprivate func controllerCountChanged(by delta: Int) {
         controllers += delta
+        onControllersChanged?(controllers)
         if controllers > 0, activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
@@ -138,6 +170,10 @@ final class ControlServer {
             guard let command = parts.first else { return }
 
             guard authenticated else {
+                if server.paused {
+                    close(saying: "paused")
+                    return
+                }
                 if command == "a", parts.count >= 2, server.pairing.verify(String(parts[1]), peer: peer) {
                     authenticated = true
                     server.controllerCountChanged(by: 1)
@@ -207,6 +243,11 @@ final class ControlServer {
             default:
                 break
             }
+        }
+
+        func close(saying message: String) {
+            send(message)
+            server.queue.asyncAfter(deadline: .now() + 0.3) { [connection] in connection.cancel() }
         }
 
         private func send(_ text: String) {

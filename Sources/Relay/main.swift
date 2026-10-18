@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import SystemConfiguration
@@ -51,4 +52,13 @@ for ip in PeerPolicy.localIPv4Addresses() {
     Log.info("  or by IP:     http://\(ip):\(webPort)/#k=\(pairing.code)")
 }
 
-dispatchMain()
+// Menu bar app: no Dock icon or windows, just the status item.
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+let menuBar = MenuBar(pairingURL: URL(string: "http://localhost:\(webPort)/pair")!) { paused in
+    controlServer.setPaused(paused)
+}
+controlServer.onControllersChanged = { count in
+    DispatchQueue.main.async { menuBar.setConnected(count) }
+}
+app.run()

@@ -19,6 +19,7 @@ enum PairingPage {
           body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #000;
                  color: #e9e2d6; font: 16px/1.5 ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
           main { width: min(420px, 100% - 32px); text-align: center; }
+          .logo { display: block; width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 15px; }
           h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
           p { margin: 0; color: #a39a8c; }
           .qr { margin: 28px auto 22px; width: 260px; height: 260px; padding: 16px; border-radius: 28px;
@@ -30,6 +31,7 @@ enum PairingPage {
           .code { font-size: 26px; font-weight: 600; letter-spacing: 0.12em; color: #d9a55b; }
           .url { margin-top: 10px; font-size: 13px; color: #6f675c; word-break: break-all; }
         </style></head><body><main>
+          <img class="logo" src="logo.svg" alt="">
           <h1>Pair your iPhone</h1>
           <p>Your iPhone needs to be on the same Wi-Fi as this Mac.</p>
           <div class="qr"><img alt="QR code that opens Relay on your iPhone" src="\(qr)"></div>

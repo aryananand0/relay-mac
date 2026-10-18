@@ -18,7 +18,7 @@ pkill -x Relay 2>/dev/null || true
 
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
 rm -rf "$APP"
-ditto build/Relay.app "$APP"
+ditto --norsrc --noextattr --noqtn build/Relay.app "$APP"
 
 # KeepAlive/SuccessfulExit=false: restart Relay if it crashes, but not after a clean stop.
 cat > "$PLIST" <<EOF

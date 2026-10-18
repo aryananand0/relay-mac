@@ -18,7 +18,14 @@
       <span class="conn-dot"></span>
       <span id="status-text">Connecting</span>
     </div>
-    <span id="rtt" class="rtt"></span>
+    <div class="topbar-end">
+      <span id="rtt" class="rtt"></span>
+      <button id="btn-settings" class="icon-button" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <p id="warning" class="notice" hidden>
@@ -34,10 +41,12 @@
         <div><dt>Right click</dt><dd>two-finger tap</dd></div>
         <div><dt>Scroll</dt><dd>two fingers</dd></div>
         <div><dt>Drag</dt><dd>tap, then touch and move</dd></div>
+        <div><dt>Switch desktop</dt><dd>three fingers left or right</dd></div>
+        <div><dt>Mission Control</dt><dd>three fingers up</dd></div>
       </dl>
       <div id="offline" class="offline" hidden>
         <strong>Can't reach your Mac</strong>
-        <span>Check that Relay is running and your iPhone is on the same Wi‑Fi.</span>
+        <span>Check that your Mac is awake and your iPhone is on the same Wi‑Fi.</span>
       </div>
     </div>
     <div id="buttons" class="clicks">
@@ -128,8 +137,34 @@
   <textarea id="kb-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             enterkeyhint="send" aria-label="Type on your Mac"></textarea>
 
+  <div id="settings" class="sheet-backdrop" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="settings-title">
+      <div class="sheet-head">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-done" class="sheet-done">Done</button>
+      </div>
+      <label class="setting">
+        <span class="setting-label">Cursor speed <output id="set-speed-value"></output></span>
+        <input id="set-speed" type="range" min="0.4" max="2" step="0.05">
+      </label>
+      <label class="setting">
+        <span class="setting-label">Scroll speed <output id="set-scroll-value"></output></span>
+        <input id="set-scroll" type="range" min="0.4" max="2.5" step="0.05">
+      </label>
+      <label class="setting setting-toggle">
+        <span class="setting-label">Natural scrolling<small>Content moves with your fingers, like a Mac trackpad</small></span>
+        <input id="set-natural" type="checkbox" switch>
+      </label>
+      <div class="sheet-actions">
+        <button id="settings-hints">Show gesture tips</button>
+        <button id="settings-reset">Reset to defaults</button>
+      </div>
+    </div>
+  </div>
+
   <div id="pairing" class="pairing" hidden>
     <form id="pairing-form">
+      <img class="pairing-logo" src="logo.svg" alt="" width="72" height="72">
       <h1>Pair with your Mac</h1>
       <p>Enter the code from the Relay pairing page on your Mac.</p>
       <input id="pairing-code" autocomplete="off" autocorrect="off" autocapitalize="characters"

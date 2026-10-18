@@ -18,6 +18,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Relay "$APP/Contents/MacOS/Relay"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 cp -R web "$APP/Contents/Resources/web"
+cp Support/Relay.icns "$APP/Contents/Resources/Relay.icns"
 
 IDENTITY="${RELAY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')}"
 if [[ -n "$IDENTITY" ]]; then

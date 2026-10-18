@@ -150,7 +150,7 @@ button { font: inherit; color: inherit; }
   pointer-events: none;
   transition: opacity 0.4s;
 }
-.hint div { display: grid; grid-template-columns: 84px max-content; gap: 12px; }
+.hint div { display: grid; grid-template-columns: 112px max-content; gap: 12px; }
 .hint dt { text-align: right; color: var(--text); opacity: 0.55; font-weight: 600; }
 .hint dd { margin: 0; color: var(--muted); opacity: 0.8; white-space: nowrap; }
 .hint.gone { opacity: 0; }
@@ -356,6 +356,7 @@ body.kb-open .pill { background: var(--amber); color: var(--amber-ink); box-shad
 }
 .pairing[hidden], .notice[hidden], .pairing-error[hidden] { display: none; }
 .pairing form { width: 100%; max-width: 330px; text-align: center; }
+.pairing-logo { display: block; margin: 0 auto 22px; border-radius: 17px; }
 .pairing h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
 .pairing p { margin: 0 0 22px; color: var(--muted); }
 .pairing input {
@@ -394,3 +395,71 @@ body.kb-open .pill { background: var(--amber); color: var(--amber-ink); box-shad
   .ripple, .conn[data-state="connecting"] .conn-dot { animation: none; }
   .dots-lit, .hint { transition: none; }
 }
+
+/* ---- Settings sheet ------------------------------------------------------- */
+.topbar-end { display: flex; align-items: center; gap: 10px; }
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+.icon-button:active { background: var(--raised); }
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.55);
+  touch-action: manipulation;
+}
+.sheet-backdrop[hidden] { display: none; }
+.sheet {
+  width: 100%;
+  padding: 18px 20px calc(env(safe-area-inset-bottom) + 18px);
+  border-radius: 26px 26px 0 0;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--line);
+  animation: sheet-in 0.22s ease-out;
+}
+@keyframes sheet-in { from { transform: translateY(40px); opacity: 0; } }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.sheet-head h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.sheet-done {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--text);
+  color: var(--black);
+  font-weight: 600;
+}
+
+.setting { display: block; padding: 12px 0; border-top: 1px solid var(--line); }
+.setting-label { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; }
+.setting-label output { color: var(--amber); font-variant-numeric: tabular-nums; font-weight: 600; }
+.setting-label small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.setting input[type="range"] { width: 100%; margin: 14px 0 4px; accent-color: var(--amber); }
+.setting-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.setting-toggle .setting-label { display: block; }
+.setting-toggle input { accent-color: var(--amber); width: 24px; height: 24px; flex: none; }
+
+.sheet-actions { display: flex; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.sheet-actions button {
+  flex: 1;
+  height: 44px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }

@@ -18,7 +18,9 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
-	<key>LSBackgroundOnly</key>
+	<key>LSUIElement</key>
 	<true/>
+	<key>CFBundleIconFile</key>
+	<string>Relay</string>
 </dict>
 </plist>
