@@ -18,7 +18,11 @@ pkill -x Relay 2>/dev/null || true
 
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
 rm -rf "$APP"
-ditto --norsrc --noextattr --noqtn build/Relay.app "$APP"
+ditto --norsrc --noextattr --noqtn build.noindex/Relay.app "$APP"
+# Only the installed copy should exist as an app (Spotlight, Open With, Login Items),
+# so the build copy is removed once it's been copied.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$PWD/build.noindex/Relay.app" 2>/dev/null || true
+rm -rf build.noindex
 
 # KeepAlive/SuccessfulExit=false: restart Relay if it crashes, but not after a clean stop.
 cat > "$PLIST" <<EOF

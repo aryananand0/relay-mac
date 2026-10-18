@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Builds build/Relay.app and code-signs it.
+# Builds build.noindex/Relay.app and code-signs it. (".noindex" keeps this
+# intermediate copy out of Spotlight; only ~/Applications/Relay.app should show up.)
 #
 # Signing: uses your free "Apple Development" identity if one exists (Xcode ›
 # Settings › Accounts › add Apple ID › Manage Certificates › +). That keeps the
@@ -9,7 +10,7 @@ set -euo pipefail
 cd "${0:A:h}/.."
 
 BUNDLE_ID="local.relay.Relay"
-APP="build/Relay.app"
+APP="build.noindex/Relay.app"
 
 swift build -c release --arch arm64
 
@@ -19,6 +20,8 @@ cp .build/release/Relay "$APP/Contents/MacOS/Relay"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 cp -R web "$APP/Contents/Resources/web"
 cp Support/Relay.icns "$APP/Contents/Resources/Relay.icns"
+# Extended attributes (Finder info, provenance) on copied files break strict signing.
+xattr -cr "$APP"
 
 IDENTITY="${RELAY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')}"
 if [[ -n "$IDENTITY" ]]; then
@@ -31,3 +34,6 @@ else
 fi
 codesign --verify --strict "$APP"
 echo "Built $APP"
+
+# Make sure macOS doesn't list this build copy as a second Relay app.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$PWD/$APP" 2>/dev/null || true
