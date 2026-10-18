@@ -1,0 +1,219 @@
+import Foundation
+import Network
+
+/// WebSocket endpoint the iPhone sends input commands to.
+///
+/// Protocol: one space-separated text message per command.
+///   a <code>        authenticate (must be first)      → "ok" | "no"
+///   m <dx> <dy>     move cursor by points (already accelerated by the client)
+///   s <dx> <dy>     scroll by pixels, wheel convention (positive = content moves down/right)
+///   c <btn> <n>     click button (0 left, 1 right) with click count n
+///   d <btn> <n>     press button
+///   u <btn> <n>     release button
+///   t <text>        type text (everything after "t " verbatim, spaces included)
+///   k <key> <mods>  press a key: return tab space delete fwddelete escape left right up down
+///                   home end pageup pagedown, or one character for shortcuts ("l");
+///                   mods is "-" or a list like "cmd,shift" (ctrl, opt, shift, cmd)
+///   x <media>       media key: play next prev volup voldown mute
+///                   (volume keys are answered with a "v" status message)
+///   q vol           ask for volume status → "v <0-100|-> <muted 0|1> <output device name>"
+///                   ("-" = this output's volume can't be changed from the Mac, e.g. a TV over HDMI)
+///   y displaysleep  turn the displays off; the next input wakes them
+///   p <token>       ping                               → "P <token> <ax>"  (ax: 1 if Accessibility granted)
+final class ControlServer {
+    private let listener: NWListener
+    private let queue: DispatchQueue
+    private let pairing: Pairing
+    private let input: InputInjector
+    private let keyboard: KeyboardInjector
+    private var sessions: [ObjectIdentifier: Session] = [:]
+    private var controllers = 0
+    /// Held only while a phone is connected: opts out of App Nap so input is
+    /// delivered on time, while still allowing the Mac to idle-sleep.
+    private var activity: NSObjectProtocol?
+
+    init(port: UInt16, queue: DispatchQueue, pairing: Pairing, input: InputInjector,
+         keyboard: KeyboardInjector) throws {
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true
+        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcp.noDelay = true
+        }
+        let ws = NWProtocolWebSocket.Options()
+        ws.autoReplyPing = true
+        ws.maximumMessageSize = 4096
+        params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
+
+        listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+        self.queue = queue
+        self.pairing = pairing
+        self.input = input
+        self.keyboard = keyboard
+    }
+
+    func start() {
+        listener.stateUpdateHandler = { state in Log.info("control listener: \(state)") }
+        listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
+        listener.start(queue: queue)
+    }
+
+    private func accept(_ connection: NWConnection) {
+        guard PeerPolicy.isAllowed(connection.endpoint) else {
+            Log.info("control: rejected \(connection.endpoint)")
+            connection.cancel()
+            return
+        }
+        let session = Session(connection: connection, server: self)
+        sessions[ObjectIdentifier(session)] = session
+        session.start(queue: queue)
+    }
+
+    fileprivate func ended(_ session: Session) {
+        guard sessions.removeValue(forKey: ObjectIdentifier(session)) != nil else { return }
+        if session.authenticated {
+            input.releaseAll()
+            controllerCountChanged(by: -1)
+            Log.info("control: \(session.peer) disconnected")
+        }
+    }
+
+    fileprivate func controllerCountChanged(by delta: Int) {
+        controllers += delta
+        if controllers > 0, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                reason: "iPhone is controlling the Mac")
+        } else if controllers == 0, let current = activity {
+            ProcessInfo.processInfo.endActivity(current)
+            activity = nil
+        }
+    }
+
+    fileprivate final class Session {
+        let connection: NWConnection
+        let peer: String
+        private(set) var authenticated = false
+        private unowned let server: ControlServer
+
+        init(connection: NWConnection, server: ControlServer) {
+            self.connection = connection
+            self.server = server
+            peer = PeerPolicy.hostKey(connection.endpoint)
+        }
+
+        func start(queue: DispatchQueue) {
+            connection.stateUpdateHandler = { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .failed, .cancelled: self.server.ended(self)
+                default: break
+                }
+            }
+            connection.start(queue: queue)
+            receive()
+        }
+
+        private func receive() {
+            connection.receiveMessage { [weak self] data, context, _, error in
+                guard let self else { return }
+                if error != nil {
+                    self.connection.cancel()
+                    return
+                }
+                let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
+                    as? NWProtocolWebSocket.Metadata
+                if meta?.opcode == .close {
+                    self.connection.cancel()
+                    return
+                }
+                if let data, !data.isEmpty, meta?.opcode == .text {
+                    self.handle(String(decoding: data, as: UTF8.self))
+                }
+                self.receive()
+            }
+        }
+
+        private func handle(_ text: String) {
+            let parts = text.split(separator: " ")
+            guard let command = parts.first else { return }
+
+            guard authenticated else {
+                if command == "a", parts.count >= 2, server.pairing.verify(String(parts[1]), peer: peer) {
+                    authenticated = true
+                    server.controllerCountChanged(by: 1)
+                    send("ok")
+                    Log.info("control: \(peer) paired (accessibility: \(server.input.hasPermission))")
+                } else {
+                    Log.info("control: \(peer) failed pairing")
+                    send("no")
+                    // Short delay slows guessing and lets "no" reach the client.
+                    server.queue.asyncAfter(deadline: .now() + 0.5) { [connection] in connection.cancel() }
+                }
+                return
+            }
+
+            switch command {
+            case "t":
+                if text.count > 2 { server.keyboard.type(String(text.dropFirst(2))) }
+            case "k":
+                guard parts.count >= 2 else { return }
+                let mods = parts.count >= 3 ? KeyboardInjector.Modifiers(list: parts[2]) : []
+                if !server.keyboard.press(String(parts[1]), modifiers: mods) {
+                    Log.info("control: unknown key \(parts[1])")
+                }
+            case "m", "s":
+                guard parts.count >= 3, let dx = Double(parts[1]), let dy = Double(parts[2]),
+                      dx.isFinite, dy.isFinite, abs(dx) < 5000, abs(dy) < 5000 else { return }
+                if command == "m" { server.input.move(dx: dx, dy: dy) }
+                else { server.input.scroll(dx: dx, dy: dy) }
+            case "c", "d", "u":
+                guard parts.count >= 3, let b = Int(parts[1]), let button = InputInjector.Button(rawValue: b),
+                      let n = Int(parts[2]), (1...3).contains(n) else { return }
+                switch command {
+                case "c": server.input.click(button, count: n)
+                case "d": server.input.press(button, count: n)
+                default: server.input.release(button, count: n)
+                }
+            case "x":
+                guard parts.count >= 2 else { return }
+                let key = String(parts[1])
+                server.input.flushMotion()
+                guard SystemControls.pressMediaKey(key) else {
+                    Log.info("control: unknown media key \(key)")
+                    return
+                }
+                if SystemControls.isVolumeKey(key) {
+                    // Give Core Audio a moment to apply the change before reporting it.
+                    server.queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        self?.send(SystemControls.volumeStatus().message)
+                    }
+                }
+            case "q":
+                if parts.count >= 2, parts[1] == "vol" { send(SystemControls.volumeStatus().message) }
+            case "y":
+                if parts.count >= 2, parts[1] == "displaysleep" {
+                    Log.info("control: \(peer) turned the displays off")
+                    SystemControls.sleepDisplays()
+                }
+            case "o":
+                // Tuning: "o smooth 0|1" toggles motion pacing, "o reserve <ms>" sets its reserve.
+                if parts.count >= 3, parts[1] == "smooth" { server.input.smoothing = parts[2] != "0" }
+                if parts.count >= 3, parts[1] == "reserve", let ms = Double(parts[2]), (0...50).contains(ms) {
+                    server.input.reserve = ms / 1000
+                }
+            case "p":
+                let token = parts.count >= 2 ? parts[1] : ""
+                send("P \(token) \(server.input.hasPermission ? 1 : 0)")
+            default:
+                break
+            }
+        }
+
+        private func send(_ text: String) {
+            let meta = NWProtocolWebSocket.Metadata(opcode: .text)
+            let context = NWConnection.ContentContext(identifier: "text", metadata: [meta])
+            connection.send(content: Data(text.utf8), contentContext: context, isComplete: true,
+                            completion: .contentProcessed { _ in })
+        }
+    }
+}

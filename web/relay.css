@@ -1,0 +1,396 @@
+/* Relay — a trackpad for a dark room.
+   True black for OLED, warm text, and a dim amber that's easy on night eyes.
+   Amber only ever means "live": your finger, the connection, an armed key. */
+:root {
+  --black: #000;
+  --surface: #15130f;
+  --raised: #1f1c17;
+  --raised-down: #2a261f;
+  --line: rgba(233, 226, 214, 0.08);
+  --text: #e9e2d6;
+  --muted: #8c8477;
+  --faint: #4f493f;
+  --amber: #d9a55b;
+  --amber-ink: #1a1206;
+  --alert: #e5735f;
+  --font: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--black);
+  color: var(--text);
+  font: 15px/1.35 var(--font);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: calc(env(safe-area-inset-top) + 4px) calc(env(safe-area-inset-right) + 14px)
+           calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 14px);
+  touch-action: none;
+}
+
+button { font: inherit; color: inherit; }
+
+/* ---- Top bar ------------------------------------------------------------ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 4px;
+}
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.conn[data-state="ok"] { color: var(--text); }
+.conn[data-state="ok"] .conn-dot { background: var(--amber); box-shadow: 0 0 8px rgba(217, 165, 91, 0.7); }
+.conn[data-state="bad"] .conn-dot { background: var(--alert); }
+.conn[data-state="connecting"] .conn-dot { animation: breathe 1.4s ease-in-out infinite; }
+.rtt { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+@keyframes breathe { 50% { opacity: 0.25; } }
+
+.notice {
+  margin: 0;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: rgba(229, 115, 95, 0.12);
+  color: #f2b7aa;
+  font-size: 13px;
+}
+
+/* ---- Trackpad: the surface and its buttons are one object -------------- */
+.trackpad {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 30px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  touch-action: none;
+  /* The resting dot grid. */
+  background-image: radial-gradient(circle, rgba(233, 226, 214, 0.075) 1.1px, transparent 1.7px);
+  background-size: 20px 20px;
+  background-position: center;
+}
+
+/* The same grid in amber, revealed only around your finger. */
+.dots-lit {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--amber) 1.5px, transparent 2.1px);
+  background-size: 20px 20px;
+  background-position: center;
+  opacity: 0;
+  -webkit-mask-image: radial-gradient(circle 150px at var(--x, 50%) var(--y, 50%), #000 0%, rgba(0,0,0,.45) 45%, transparent 100%);
+  mask-image: radial-gradient(circle 150px at var(--x, 50%) var(--y, 50%), #000 0%, rgba(0,0,0,.45) 45%, transparent 100%);
+  transition: opacity 0.25s ease-out;
+  pointer-events: none;
+}
+.surface.touching .dots-lit { opacity: 1; transition-duration: 0.06s; }
+
+/* A click lands: a ring opens where you tapped. */
+.ripple {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--amber);
+  pointer-events: none;
+  animation: ripple 0.42s ease-out forwards;
+}
+.ripple.right { border-style: dashed; }
+@keyframes ripple {
+  from { transform: scale(0.35); opacity: 0.9; }
+  to { transform: scale(1.5); opacity: 0; }
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+.hint div { display: grid; grid-template-columns: 84px max-content; gap: 12px; }
+.hint dt { text-align: right; color: var(--text); opacity: 0.55; font-weight: 600; }
+.hint dd { margin: 0; color: var(--muted); opacity: 0.8; white-space: nowrap; }
+.hint.gone { opacity: 0; }
+
+.offline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 40px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+}
+.offline strong { font-size: 17px; }
+.offline span { color: var(--muted); font-size: 14px; }
+.offline[hidden] { display: none; }
+
+.clicks {
+  display: flex;
+  height: 68px;
+  border-top: 1px solid var(--line);
+}
+.clicks button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  touch-action: none;
+  transition: background 0.12s, color 0.12s;
+}
+.clicks #btn-left { flex: 1.7; }
+.clicks #btn-right { border-left: 1px solid var(--line); }
+.clicks button.down { background: var(--raised-down); color: var(--text); transition: none; }
+
+/* ---- Keyboard keys (only while the iOS keyboard is up) ----------------- */
+.keys { display: none; gap: 5px; height: 42px; }
+body.kb-open .keys { display: flex; }
+body.kb-open .hint { display: none; }
+body.kb-open { padding-bottom: 8px; gap: 8px; }   /* the keyboard covers the home indicator */
+body.kb-open .clicks { height: 54px; }
+
+.keys button {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--raised);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  touch-action: none;
+}
+.keys button[data-mod] { font-size: 17px; }
+.keys button.down { background: var(--raised-down); box-shadow: inset 0 0 0 1px var(--line); }
+.keys button.armed { background: var(--amber); color: var(--amber-ink); box-shadow: none; }
+.keys button.locked {
+  background: var(--amber);
+  color: var(--amber-ink);
+  box-shadow: inset 0 0 0 2px var(--amber-ink), 0 0 0 1px var(--amber);
+}
+
+/* ---- Remote mode ----------------------------------------------------------- */
+.remote {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 14px;
+}
+.remote[hidden], .trackpad[hidden] { display: none; }
+
+.remote button {
+  border: 0;
+  background: var(--raised);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
+  color: var(--text);
+  touch-action: none;
+  transition: background 0.12s;
+}
+.remote button.down { background: var(--raised-down); box-shadow: inset 0 0 0 1px var(--line); transition: none; }
+
+.transport { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.transport .play {
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.transport-row { display: flex; justify-content: center; gap: 14px; }
+.transport-row button {
+  width: 64px;
+  height: 52px;
+  border-radius: 26px;
+  display: grid;
+  place-items: center;
+}
+
+.volume { padding: 0 2px; }
+.volume-head {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 4px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.volume-device { color: var(--faint); font-weight: 500; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.volume-row { display: flex; align-items: center; gap: 10px; }
+.volume-row button { width: 52px; height: 48px; border-radius: 14px; flex: none; display: grid; place-items: center; }
+.volume-row #btn-mute.on { background: var(--amber); color: var(--amber-ink); box-shadow: none; }
+.volume-meter { flex: 1; display: flex; gap: 3px; height: 22px; align-items: stretch; }
+.volume-meter span { flex: 1; border-radius: 2px; background: rgba(233, 226, 214, 0.1); }
+.volume-meter span.lit { background: var(--amber); }
+.volume-meter.muted span.lit { background: rgba(217, 165, 91, 0.3); }
+.volume-meter.unknown span { background: rgba(233, 226, 214, 0.05); }
+.volume-note { margin: 10px 4px 0; color: var(--muted); font-size: 13px; }
+.volume-note[hidden] { display: none; }
+
+.shortcuts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shortcuts button {
+  height: 46px;
+  border-radius: 13px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.shortcuts .wide { grid-column: 1 / -1; color: var(--muted); }
+
+body.kb-open .transport .play { width: 80px; height: 80px; }
+body.kb-open .shortcuts, body.kb-open .volume-note { display: none; }
+
+/* ---- Dock ---------------------------------------------------------------- */
+.dock { display: flex; gap: 10px; }
+.modes {
+  flex: 1;
+  display: flex;
+  padding: 3px;
+  border-radius: 23px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.modes button {
+  flex: 1;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+}
+.modes button[aria-selected="true"] { background: var(--raised-down); color: var(--text); }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 23px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.pill:active { background: var(--raised-down); }
+body.kb-open .pill { background: var(--amber); color: var(--amber-ink); box-shadow: none; }
+
+/* ---- Hidden field that receives the iOS keyboard ----------------------- */
+#kb-input {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;            /* <16px makes iOS zoom on focus */
+  resize: none;
+  caret-color: transparent;
+}
+
+/* ---- Pairing ------------------------------------------------------------- */
+.pairing {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--black);
+  touch-action: manipulation;
+}
+.pairing[hidden], .notice[hidden], .pairing-error[hidden] { display: none; }
+.pairing form { width: 100%; max-width: 330px; text-align: center; }
+.pairing h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.pairing p { margin: 0 0 22px; color: var(--muted); }
+.pairing input {
+  width: 100%;
+  padding: 16px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--amber);
+  font: 600 24px var(--font);
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pairing input::placeholder { color: var(--faint); }
+.pairing input:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--amber); }
+.pairing button {
+  width: 100%;
+  margin-top: 14px;
+  padding: 15px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--text);
+  color: var(--black);
+  font-size: 17px;
+  font-weight: 600;
+}
+.pairing .pairing-error { margin: 12px 0 0; color: var(--alert); font-size: 14px; }
+
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple, .conn[data-state="connecting"] .conn-dot { animation: none; }
+  .dots-lit, .hint { transition: none; }
+}
