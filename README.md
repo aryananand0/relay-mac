@@ -106,7 +106,7 @@ This opens the pairing page on the Mac (or choose **Show Pairing Code…** from 
 
 1. **Trust this Mac (once).** Relay talks to your iPhone over HTTPS, using a certificate it creates for your Mac. Get it onto the iPhone:
    - **Recommended:** choose **Send Certificate to iPhone…** from the menu bar icon and pick your iPhone in AirDrop.
-   - **Or** scan the first QR code and tap **Get the certificate**.
+   - **No AirDrop?** Scan the first QR code to download it, and before trusting it, check that its fingerprint in iPhone Settings matches the one on the pairing page.
 
    Then on the iPhone, open **Settings › Profile Downloaded › Install**, and turn it on under **Settings › General › About › Certificate Trust Settings**.
 2. **Open Relay.** Scan the second QR code, then in Safari tap **Share › Add to Home Screen**. The icon pairs itself.
@@ -194,7 +194,7 @@ Relay can control your Mac, so it is careful about who it talks to and what leav
 - **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute, and more than 20 wrong attempts a minute from anywhere pause pairing.
 - **HTTPS:** the phone page and the control connection use TLS 1.2 or later, with a certificate from a small certificate authority Relay creates on your Mac:
   - Its private keys live in your login Keychain and can't be exported.
-  - The authority is limited by a Name Constraints extension to `.local` names, `localhost` and private network addresses. Even if its key were stolen, it couldn't be used to impersonate real websites on your iPhone.
+  - The authority can only vouch for web servers on your own network: `.local` names, `localhost` and private addresses (Name Constraints and Extended Key Usage). Even if its key were stolen, it couldn't be used to impersonate real websites, sign email or vouch for apps on your iPhone.
   - Plain HTTP (port 8765) only serves the setup page and the certificate itself, never the app or anything secret.
 - **End-to-end encryption, inside HTTPS:** every connection does a fresh X25519 key exchange, authenticated by the pairing code (stretched with PBKDF2, 600 000 rounds). After that, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305: what you type, the clipboard and the screen preview. The code never crosses the network, and a recording of the traffic can't be used to guess it or to decrypt past sessions later. Altered or replayed messages are rejected.
 - **Browser protections:**

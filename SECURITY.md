@@ -31,7 +31,7 @@ The [Security section of the README](README.md#privacy-and-security) describes t
 - **Only local devices:** the Mac accepts connections only from private, link-local or same-subnet addresses. Relay never contacts the internet and has no accounts, cloud service or telemetry.
 - **Pairing code:** a phone must prove it knows the pairing code before anything is accepted. Five wrong attempts lock that address out for a minute.
 - **Encryption:** each connection does a fresh X25519 exchange, authenticated by the pairing code stretched with PBKDF2 (600 000 rounds). Then everything is encrypted with ChaCha20-Poly1305. The code never crosses the network; recorded traffic can't be used to guess it offline or to decrypt past sessions.
-- **HTTPS:** the phone page and control connection use TLS with a certificate from a certificate authority Relay creates on the Mac. Its keys are non-exportable Keychain keys, and Name Constraints limit it to `.local` names, `localhost` and private addresses, so it can't vouch for real websites.
+- **HTTPS:** the phone page and control connection use TLS with a certificate from a certificate authority Relay creates on the Mac. Its keys are non-exportable Keychain keys. Name Constraints limit it to `.local` names, `localhost` and private addresses, with email and URI names locked to the reserved `invalid` domain, and its Extended Key Usage allows web servers only. So it can't vouch for real websites, email or code.
 - **Browser isolation:** only Relay's own page may open the control connection, and the pairing page is served only to the Mac itself.
 
 Known limits, which are not vulnerabilities in themselves but are worth understanding:

@@ -8,9 +8,11 @@ import Security
 ///
 /// - **Keys:** both private keys are P-256 keys created in your login Keychain and can't be
 ///   exported. Public certificates go to ~/Library/Application Support/Relay/tls/.
-/// - **The CA can only vouch for local names:** a critical Name Constraints extension limits it
-///   to `*.local`, `localhost` and private IPv4 ranges. The iPhone trusts it for those and
-///   nothing else, so even a stolen CA key couldn't impersonate real websites.
+/// - **The CA can only vouch for local web servers:** an Extended Key Usage of serverAuth only,
+///   and critical Name Constraints: DNS names under `local` and `localhost`, private IPv4
+///   ranges, and email/URI names only under the unusable `invalid` domain. The iPhone trusts it
+///   for those and nothing else, so even a stolen CA key couldn't impersonate real websites,
+///   sign email, or vouch for code. Only Relay may use the key without the Keychain asking you.
 /// - **Renewal:** the CA is valid for 10 years. The server certificate is valid for 397 days
 ///   (within Apple's limits) and renewed automatically 30 days before it expires, or whenever
 ///   the Mac's name or addresses change. The phone never needs to do anything for that.
@@ -24,6 +26,10 @@ final class TLSIdentity {
     static var profileURL: URL { dir.appendingPathComponent("Relay.mobileconfig") }
     private static var serverCertURL: URL { dir.appendingPathComponent("server.cer") }
     private static var serverNamesURL: URL { dir.appendingPathComponent("server-names") }
+    private static var caVersionURL: URL { dir.appendingPathComponent("ca-version") }
+    /// Bump when the CA's constraints change: the old CA, its key and its server certificate
+    /// are discarded, and phones install the new profile once.
+    private static let caVersion = "2"
 
     private static let caTag = Data("local.relay.tls.ca".utf8)
     private static let serverTag = Data("local.relay.tls.server".utf8)
@@ -39,6 +45,21 @@ final class TLSIdentity {
                                                 attributes: [.posixPermissions: 0o700])
         let caName = "Relay Local CA (\(hostName))"
         let serverName = "Relay (\(hostName))"
+
+        // A CA from an older version (weaker constraints): discard it, key and all, so it can't
+        // be used to vouch for anything again.
+        let savedVersion = (try? String(contentsOf: TLSIdentity.caVersionURL, encoding: .utf8)) ?? ""
+        if savedVersion != TLSIdentity.caVersion {
+            if FileManager.default.fileExists(atPath: TLSIdentity.caCertificateURL.path) {
+                Log.info("tls: replacing an older certificate authority; install the new profile on your iPhone")
+            }
+            SecItemDelete([kSecClass: kSecClassKey, kSecAttrApplicationTag: TLSIdentity.caTag] as CFDictionary)
+            SecItemDelete([kSecClass: kSecClassCertificate, kSecAttrLabel: caName] as CFDictionary)
+            for url in [TLSIdentity.caCertificateURL, TLSIdentity.caPEMURL, TLSIdentity.serverCertURL] {
+                try? FileManager.default.removeItem(at: url)
+            }
+            try TLSIdentity.writeFile(Data(TLSIdentity.caVersion.utf8), to: TLSIdentity.caVersionURL)
+        }
 
         // The certificate authority: created once, reused for 10 years.
         let caKey = try TLSIdentity.key(tag: TLSIdentity.caTag, label: caName)
@@ -101,13 +122,17 @@ final class TLSIdentity {
         let ranges: [[UInt8]] = [[10, 0, 0, 0, 255, 0, 0, 0], [172, 16, 0, 0, 255, 240, 0, 0],
                                  [192, 168, 0, 0, 255, 255, 0, 0], [169, 254, 0, 0, 255, 255, 0, 0],
                                  [127, 0, 0, 0, 255, 0, 0, 0]]
+        // Each name type a certificate could carry is constrained: DNS and IP to local values,
+        // email (rfc822Name) and URI to the reserved, unusable "invalid" domain (RFC 6761).
         let permitted = [DER.implicit(2, Data("local".utf8)), DER.implicit(2, Data("localhost".utf8))]
             + ranges.map { DER.implicit(7, Data($0)) }
+            + [DER.implicit(1, Data("invalid".utf8)), DER.implicit(6, Data(".invalid".utf8))]
         let nameConstraints = DER.sequence(DER.implicitConstructed(0, permitted.map { DER.sequence($0) }.reduce(Data(), +)))
         let extensions = [
             ext("2.5.29.19", critical: true, DER.sequence(DER.boolean(true), DER.integer(0))),   // CA, path length 0
             ext("2.5.29.15", critical: true, DER.bitString(Data([0x06]), unused: 1)),           // keyCertSign, cRLSign
             ext("2.5.29.30", critical: true, nameConstraints),
+            ext("2.5.29.37", critical: false, DER.sequence(DER.oid("1.3.6.1.5.5.7.3.1"))),      // serverAuth only
             ext("2.5.29.14", critical: false, DER.octetString(ski)),
         ]
         return try sign(tbs(subject: name, issuer: name, spki: spki, years: 10, extensions: extensions), with: key)

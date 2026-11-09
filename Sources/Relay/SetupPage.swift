@@ -32,6 +32,10 @@ enum SetupPage {
           .status.ready { color: #1a1206; background: #d9a55b; }
           .status.ready a { color: #1a1206; font-weight: 600; }
           .note { margin-top: 18px; font-size: 13px; color: #6f675c; text-align: center; }
+          details { margin-top: 10px; }
+          summary { color: #d9a55b; cursor: pointer; }
+          details p { margin: 8px 0 0; font-size: 14px; }
+          .warn { color: #f2b7aa; }
           .dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 4px; background: #4f493f;
                  animation: breathe 1.4s ease-in-out infinite; vertical-align: middle; }
           @keyframes breathe { 50% { opacity: .25; } }
@@ -40,8 +44,11 @@ enum SetupPage {
           <h1>Set up Relay</h1>
           <p class="lead">Relay connects over HTTPS. Your iPhone needs to trust this Mac once.</p>
           <ol>
-            <li><strong>Get the certificate.</strong> The safest way is from the Mac: Relay menu › <em>Send Certificate to iPhone…</em> (AirDrop). Or:
-              <a class="button" href="Relay.mobileconfig">Get the certificate</a></li>
+            <li><strong>Send the certificate from your Mac.</strong> Click the Relay icon in the Mac's menu bar, choose <em>Send Certificate to iPhone…</em>, and pick this iPhone in AirDrop. AirDrop sends it directly, so nobody on the network can swap it.
+              <details><summary>Can't use AirDrop?</summary>
+                <p>You can download it here instead, but on a network you don't control, someone could hand you a different certificate. <span class="warn">Before step 3, make sure it's genuine:</span> in Settings › General › VPN &amp; Device Management › Relay Local CA › More Details, the SHA‑256 fingerprint must match the one on your Mac's pairing page (Relay menu › Show Pairing Code…).</p>
+                <a class="button" href="Relay.mobileconfig">Download the certificate</a>
+              </details></li>
             <li><strong>Install it.</strong> Open Settings, tap <em>Profile Downloaded</em> near the top, then Install.</li>
             <li><strong>Trust it.</strong> Settings › General › About › Certificate Trust Settings › turn on <em>Relay Local CA</em>.</li>
             <li><strong>Open Relay</strong> by scanning the second QR code on your Mac (Relay menu › <em>Show Pairing Code…</em>), then Share › Add to Home Screen.</li>

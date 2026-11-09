@@ -48,15 +48,15 @@ enum PairingPage {
               <h2><span class="n">1</span>Trust this Mac (once)</h2>
               <p>Relay uses HTTPS. Your iPhone needs this Mac's certificate first.</p>
               <ol>
-                <li><strong>Easiest:</strong> choose <em>Send Certificate to iPhone…</em> from the Relay icon in the menu bar and pick your iPhone in AirDrop.<br>
-                    <span class="small">Or scan this code and tap “Get the certificate”:</span></li>
+                <li><strong>Recommended:</strong> choose <em>Send Certificate to iPhone…</em> from the Relay icon in the menu bar and pick your iPhone in AirDrop.<br>
+                    <span class="small">No AirDrop? Scan this code for the setup page, which can download it:</span></li>
               </ol>
               <div class="qr"><img alt="QR code that opens Relay's setup page on your iPhone" src="\(setupQR)"></div>
               <ol start="2">
                 <li>On the iPhone: Settings › Profile Downloaded › Install.</li>
                 <li>Settings › General › About › Certificate Trust Settings › turn on <em>Relay Local CA</em>.</li>
               </ol>
-              <p class="small" style="margin-top:12px">To make sure it's the right certificate, its SHA‑256 fingerprint (Settings › General › VPN &amp; Device Management › Relay Local CA › More Details) should be:</p>
+              <p class="small" style="margin-top:12px">If you downloaded it instead of using AirDrop, check it's genuine before step 3: its SHA‑256 fingerprint (Settings › General › VPN &amp; Device Management › Relay Local CA › More Details) must be:</p>
               <div class="fp">\(escape(fingerprint))</div>
             </section>
             <section class="step">

@@ -147,6 +147,21 @@ let pair = curl(["http://localhost:8765/pair"])
 check(pair.hasPrefix("HTTP/1.1 200") && pair.contains("frame-ancestors 'none'"), "pairing page served to this Mac")
 check(curl(["-X", "POST", "http://127.0.0.1:8765/"]).hasPrefix("HTTP/1.1 405"), "only GET and HEAD are accepted")
 
+// 7b. Relay's certificate authority can only vouch for local web servers.
+let caText: String = {
+    let p = Process(), pipe = Pipe()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+    p.arguments = ["x509", "-inform", "DER", "-noout", "-text", "-in", RelayTrust.caURL.path]
+    p.standardOutput = pipe; p.standardError = Pipe()
+    try? p.run(); p.waitUntilExit()
+    return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+}()
+check(caText.contains("Name Constraints: critical") && caText.contains("DNS:local") && caText.contains("DNS:localhost")
+      && caText.contains("IP:192.168.0.0/255.255.0.0") && !caText.contains("IP:0.0.0.0"),
+      "the CA is name-constrained to local names and private addresses")
+check(caText.contains("email:invalid") && caText.contains("URI:.invalid"), "the CA can't vouch for email or URI identities")
+check(caText.contains("TLS Web Server Authentication") && !caText.contains("Code Signing"), "the CA is limited to web servers")
+
 // 8. The pairing code is never written to the log (since Relay last started).
 let log = (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Logs/Relay/relay.log"), encoding: .utf8)) ?? ""
