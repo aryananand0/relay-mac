@@ -49,14 +49,14 @@ function loadCode() { try { return localStorage.getItem(CODE_KEY) || ""; } catch
 function saveCode(c) { try { localStorage.setItem(CODE_KEY, c); } catch {} }
 function clearCode() { try { localStorage.removeItem(CODE_KEY); localStorage.removeItem("relay.stretched"); } catch {} }
 
-let code = loadCode();
-const fromUrl = new URLSearchParams(location.hash.slice(1)).get("k");
-if (fromUrl) {
-  code = fromUrl.toUpperCase();
-  saveCode(code);
-  // The code stays in the address on purpose: "Add to Home Screen" saves this URL,
-  // and the Home Screen app has its own storage, so the icon pairs itself on first launch.
-}
+// Which code to try: the one that last worked comes first. The code in the link (#k=…, from
+// the QR code) is only a fallback, because "Add to Home Screen" saves the link forever, so
+// after the code changes on the Mac the icon keeps carrying the old one. A code is saved
+// only once the Mac accepts it.
+const normalizeCode = (c) => (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const urlCode = normalizeCode(new URLSearchParams(location.hash.slice(1)).get("k"));
+let code = loadCode() || urlCode;
+let triedUrlCode = !urlCode || code === urlCode;
 
 function showPairing(error) {
   pairing.hidden = false;
@@ -66,10 +66,10 @@ function showPairing(error) {
 
 pairingForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  const entered = pairingInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const entered = normalizeCode(pairingInput.value);
   if (!entered) return;
   code = entered;
-  saveCode(code);
+  triedUrlCode = true;   // a typed code that's wrong goes straight back to this form
   pairing.hidden = true;
   pairingInput.blur();
   connect(true);
@@ -141,7 +141,7 @@ function connect(immediate) {
           channel = { sendKey: hello.sendKey, receiveKey: hello.receiveKey, sendCounter: 0, receiveCounter: 0 };
           socket.send(hello.reply);
         });
-      } else if (parts[0] === "no" || parts[0] === "paused") {
+      } else if (parts[0] === "no" || parts[0] === "paused" || parts[0] === "wait") {
         handleMessage(socket, ev.data);
       }
       return;
@@ -189,6 +189,7 @@ function handleMessage(socket, data) {
   const parts = data.split(" ");
   switch (parts[0]) {
     case "ok":
+      saveCode(code);
       authed = true;
       retryDelay = 300;
       lastPong = performance.now();
@@ -199,14 +200,28 @@ function handleMessage(socket, data) {
       requestPreview();
       break;
     case "no":
-      clearCode();
-      code = "";
       socket.onclose = null;
       socket.close();
       ws = null;
       channel = null;
+      if (!triedUrlCode) {
+        // The saved code was replaced on the Mac; try the one from the link before asking.
+        triedUrlCode = true;
+        code = urlCode;
+        connect(true);
+        break;
+      }
+      clearCode();
+      code = "";
       setStatus("bad", "Not paired");
       showPairing(true);
+      break;
+    case "wait":
+      // Too many wrong attempts from this network address recently. Keep the code and retry
+      // in a little while; the Mac lifts the lockout after a minute.
+      setStatus("bad", "Too many attempts");
+      showOffline("Too many pairing attempts", "Relay will try again in a moment.");
+      retryDelay = 15000;
       break;
     case "v":
       showVolume(parts);

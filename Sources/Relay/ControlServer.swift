@@ -7,7 +7,7 @@ import SystemConfiguration
 ///
 /// Pairing and encryption (SecureChannel): Relay opens with "n <nonce> <public key> <salt>
 /// <iterations>"; the phone answers "a <nonce> <public key> <proof>" (→ "no" or "paused" in
-/// plaintext on failure). From then on every
+/// plaintext on failure, or "wait" while that address is locked out after wrong attempts). From then on every
 /// message both ways is encrypted; the commands below are what's inside. A phone that hasn't
 /// paired within 10 seconds is disconnected.
 ///
@@ -279,17 +279,18 @@ final class ControlServer {
             }
             let parts = text.split(separator: " ")
             var accepted: SecureChannel?
+            var outcome = Pairing.Outcome.wrong
             if parts.count == 4, parts[0] == "a", let phoneNonce = Data(hex: parts[1]),
                let phonePublic = Data(hex: parts[2]), let proof = Data(hex: parts[3]) {
-                _ = server.pairing.authenticate(peer: lockoutKey) { stretched in
+                outcome = server.pairing.authenticate(peer: lockoutKey) { stretched in
                     accepted = SecureChannel.accept(stretched: stretched, macNonce: macNonce, macSecret: macSecret,
                                                     phoneNonce: phoneNonce, phonePublic: phonePublic, proof: proof)
                     return accepted != nil
                 }
             }
             guard let accepted else {
-                Log.info("control: \(peer) failed pairing")
-                sendPlain("no")
+                Log.info("control: \(peer) \(outcome == .lockedOut ? "is locked out" : "failed pairing")")
+                sendPlain(outcome == .lockedOut ? "wait" : "no")
                 // Short delay slows guessing and lets "no" reach the client.
                 server.queue.asyncAfter(deadline: .now() + 0.5) { [connection] in connection.cancel() }
                 return

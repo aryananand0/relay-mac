@@ -8,7 +8,10 @@
   const shot = new URLSearchParams(location.search).get("shot") || "trackpad";
   // Several shots load side by side and share this origin's storage, so only the (identical)
   // pairing code goes there; each shot's own state is applied after load, below.
-  try { localStorage.setItem("relay.pairingCode", DEMO_CODE); } catch {}
+  // ?pairing=test leaves storage alone, for testing how the page picks its code.
+  if (new URLSearchParams(location.search).get("pairing") !== "test") {
+    try { localStorage.setItem("relay.pairingCode", DEMO_CODE); } catch {}
+  }
 
   const enc = new TextEncoder(), dec = new TextDecoder();
   const SCREENS = [{ x: 0, y: 0, w: 1512, h: 982 }, { x: 1512, y: -98, w: 1920, h: 1080 }];
@@ -52,12 +55,17 @@
     say(text) { this.sendSealed(0x54, enc.encode(text)); }
     send(data) {
       if (typeof data === "string") {          // the handshake
-        const [, nonceHex, publicHex] = data.split(" ");
+        const [, nonceHex, publicHex, proofHex] = data.split(" ");
         const phonePublic = RelayCrypto.fromHex(publicHex);
         const shared = RelayCrypto.x25519(this.macSecret, phonePublic);
         const stretched = RelayCrypto.stretchCode(DEMO_CODE, RelayCrypto.toHex(this.salt), 600000);
         const keys = RelayCrypto.hkdf(RelayCrypto.concat(shared, stretched),
           RelayCrypto.concat(this.macNonce, RelayCrypto.fromHex(nonceHex), this.macPublic, phonePublic), enc.encode("relay v2"), 96);
+        // Check the proof like the real Mac does, so a wrong code is refused.
+        const expected = RelayCrypto.toHex(RelayCrypto.hmac(keys.subarray(0, 32), enc.encode("relay-auth-v2")));
+        window.demoAttempts = (window.demoAttempts || 0) + 1;
+        if (window.demoLockedOut) { this.deliver("wait"); return; }
+        if (expected !== proofHex) { this.deliver("no"); return; }
         this.fromPhone = keys.slice(32, 64); this.toPhone = keys.slice(64, 96); this.inCount = 0; this.outCount = 0;
         this.say("ok");
         return;

@@ -70,18 +70,21 @@ final class Pairing {
         Log.info("pairing: new pairing code created")
     }
 
+    enum Outcome { case accepted, wrong, lockedOut }
+
     /// Runs `check` with the stretched code unless pairing is locked for `peer` (a lockout key
-    /// from PeerPolicy) or globally, and counts failures.
-    func authenticate(peer: String, _ check: (Data) -> Bool) -> Bool {
+    /// from PeerPolicy) or globally, and counts failures. "Locked out" is reported separately so
+    /// a phone with the right code keeps it and retries later instead of forgetting it.
+    func authenticate(peer: String, _ check: (Data) -> Bool) -> Outcome {
         lock.lock()
         defer { lock.unlock() }
         let now = Date()
-        if globalLockUntil > now { return false }
+        if globalLockUntil > now { return .lockedOut }
         var entry = failures[peer] ?? (0, .distantPast)
-        if entry.lockedUntil > now { return false }
+        if entry.lockedUntil > now { return .lockedOut }
         if check(stretchedKey) {
             failures[peer] = nil
-            return true
+            return .accepted
         }
         entry.count += 1
         if entry.count >= Pairing.maxFailures {
@@ -98,7 +101,7 @@ final class Pairing {
         }
         // Bound memory without ever forgetting an address that's locked out.
         if failures.count > 1024 { failures = failures.filter { $0.value.lockedUntil > now } }
-        return false
+        return .wrong
     }
 
     /// "ABCD EFGH JKMN" for display.
