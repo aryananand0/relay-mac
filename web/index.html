@@ -21,6 +21,11 @@
     <div class="topbar-end">
       <span id="rtt" class="rtt"></span>
       <button id="power-chip" class="chip" hidden></button>
+      <button id="btn-screen" class="icon-button" aria-label="Show Mac screen" aria-pressed="false">
+        <svg width="21" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/>
+        </svg>
+      </button>
       <button id="btn-find" class="icon-button" aria-label="Find my cursor">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
@@ -39,6 +44,18 @@
   </p>
 
   <section id="trackpad" class="trackpad">
+    <div id="preview" class="preview" hidden>
+      <div id="preview-stage" class="preview-stage">
+        <svg id="preview-cursor" class="preview-cursor" width="14" height="20" viewBox="0 0 14 20" hidden aria-hidden="true">
+          <path d="M1 1v15.5l3.9-3.6 2.6 5.9 2.6-1.1-2.6-5.8H13z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+        <div id="preview-tabs" class="preview-tabs"></div>
+      </div>
+      <div id="preview-msg" class="preview-msg" hidden>
+        <p></p>
+        <button id="preview-retry">Try again</button>
+      </div>
+    </div>
     <div id="pad" class="surface">
       <div class="dots dots-lit" aria-hidden="true"></div>
       <dl id="hint" class="hint">

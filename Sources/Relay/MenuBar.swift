@@ -33,6 +33,7 @@ final class MenuBar: NSObject {
         menu.addItem(pauseItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Log", action: #selector(openLog), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Restart Relay", action: #selector(restart), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Quit Relay", action: #selector(quit), keyEquivalent: "q").target = self
         item.menu = menu
         item.button?.toolTip = "Relay"
@@ -78,6 +79,10 @@ final class MenuBar: NSObject {
     }
 
     @objc private func openLog() { NSWorkspace.shared.open(Log.fileURL) }
+
+    /// Needed once after allowing Screen Recording, which macOS applies only to a fresh launch.
+    /// Exiting with an error status makes launchd start Relay again within a few seconds.
+    @objc private func restart() { exit(75) }
 
     /// A clean exit: launchd won't restart Relay until the next login.
     @objc private func quit() { NSApp.terminate(nil) }

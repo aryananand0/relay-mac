@@ -190,17 +190,23 @@ final class InputInjector {
             let amplitude = i == strokes ? 0 : 160 * (1 - Double(i) / Double(strokes + 4))
             let x = center.x + (i % 2 == 0 ? amplitude : -amplitude)
             queue.asyncAfter(deadline: .now() + Double(i) * 0.016) { [self] in
-                jump(to: CGPoint(x: x, y: center.y))
+                moveTo(CGPoint(x: x, y: center.y))
             }
         }
     }
 
-    private func jump(to target: CGPoint) {
+    /// Where Relay last put the cursor (or the system's cursor location).
+    var location: CGPoint { cursorLocation() }
+
+    /// Puts the cursor at a point in global screen coordinates (tap on the screen preview).
+    func moveTo(_ target: CGPoint) {
+        pending = (0, 0)
         let from = cursorLocation()
         let p = Displays.clamp(target)
         position = p
         lastMoveAt = CFAbsoluteTimeGetCurrent()
-        post(.mouseMoved, at: p, button: .left) { e in
+        let type: CGEventType = pressed.contains(.left) ? .leftMouseDragged : .mouseMoved
+        post(type, at: p, button: .left) { e in
             e.setIntegerValueField(.mouseEventDeltaX, value: Int64((p.x - from.x).rounded()))
             e.setIntegerValueField(.mouseEventDeltaY, value: Int64((p.y - from.y).rounded()))
         }

@@ -10,6 +10,8 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 LOG="$HOME/Library/Logs/Relay/relay.log"
 
+export RELAY_BUILD_DIR="${TMPDIR:-/tmp}/relay-build.noindex"
+BUILT="$RELAY_BUILD_DIR/Relay.app"
 ./scripts/build.sh
 
 # Stop whatever is running (installed agent or a copy started by hand).
@@ -18,11 +20,11 @@ pkill -x Relay 2>/dev/null || true
 
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
 rm -rf "$APP"
-ditto --norsrc --noextattr --noqtn build.noindex/Relay.app "$APP"
+ditto --norsrc --noextattr --noqtn "$BUILT" "$APP"
 # Only the installed copy should exist as an app (Spotlight, Open With, Login Items),
 # so the build copy is removed once it's been copied.
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$PWD/build.noindex/Relay.app" 2>/dev/null || true
-rm -rf build.noindex
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$BUILT" 2>/dev/null || true
+rm -rf "$BUILT"
 
 # KeepAlive/SuccessfulExit=false: restart Relay if it crashes, but not after a clean stop.
 cat > "$PLIST" <<EOF

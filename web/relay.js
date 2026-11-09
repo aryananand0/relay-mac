@@ -118,8 +118,10 @@ function connect(immediate) {
   ws = socket;
   authed = false;
 
+  socket.binaryType = "arraybuffer";
   socket.onopen = () => socket.send("a " + code);
   socket.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) { showFrame(ev.data); return; }
     const data = String(ev.data);
     if (data.startsWith("B ")) { showMacClipboard(data.slice(2)); return; }
     const parts = data.split(" ");
@@ -132,6 +134,7 @@ function connect(immediate) {
         ping();
         send("q power");
         if (mode === "remote") send("q vol");
+        requestPreview();
         break;
       case "no":
         clearCode();
@@ -147,6 +150,12 @@ function connect(immediate) {
         break;
       case "W":
         showPower(Number(parts[1]), Number(parts[2]));
+        break;
+      case "S":
+        showLayout(parts);
+        break;
+      case "C":
+        showCursor(Number(parts[1]), Number(parts[2]));
         break;
       case "paused":
         setStatus("bad", "Paused on your Mac");
@@ -185,7 +194,8 @@ setInterval(() => {
 }, 2000);
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible") { stopPreview(); return; }
+  requestPreview();
   if (authed) {
     // The socket may look open but be dead after a suspend; verify quickly.
     const sentAt = performance.now();
@@ -756,6 +766,7 @@ function setMode(next) {
   }
   try { localStorage.setItem(MODE_KEY, mode); } catch {}
   if (mode === "remote") send("q vol");
+  if (mode === "trackpad") requestPreview(); else stopPreview();
 }
 
 for (const tab of document.querySelectorAll(".modes [data-mode]")) {
@@ -926,6 +937,237 @@ $("clip-copy").addEventListener("click", () => {
   clipText.blur();
   setClipState(copied ? "Copied to your iPhone" : "Select the text and tap Copy");
 });
+
+// ---- Screen preview ----------------------------------------------------------
+// Off until you tap the screen button, and only while the Trackpad is showing and
+// Relay is on screen. By default ("Auto") the Mac sends only the screen the cursor is
+// on, full width, and switches when the cursor moves to another screen. "All" stacks
+// every screen, each as wide as possible; 1, 2… pin one screen (or swipe between them).
+// The Mac sends a frame only when that screen changes, slows down when you're not
+// touching anything, and pauses the preview after 3 minutes untouched.
+const previewPanel = $("preview"), stage = $("preview-stage"), previewTabs = $("preview-tabs");
+const previewMsg = $("preview-msg"), screenButton = $("btn-screen"), previewCursor = $("preview-cursor");
+const previewRetry = $("preview-retry");
+const PREVIEW_MODE_KEY = "relay.previewMode";
+const AUTO = -2, ALL = -1, TILE_GAP = 6;
+// (var, not let: setMode reads these while the page is still starting up.)
+var previewOn = false;
+var previewMode = AUTO;   // AUTO, ALL, or one screen's index
+var layout = null;        // { x, y, w, h, shown, rects: [{ x, y, w, h }] } in Mac points
+var tiles = [];           // one <img> per screen
+var boxes = [];           // where each shown screen sits on the stage, in CSS px
+try { const m = Number(localStorage.getItem(PREVIEW_MODE_KEY)); if (m >= AUTO) previewMode = m; } catch {}
+
+function previewWanted() {
+  return previewOn && mode === "trackpad" && document.visibilityState === "visible";
+}
+
+function shownIndices() {
+  if (!layout) return [];
+  return layout.shown >= 0 ? [layout.shown] : layout.rects.map((_, i) => i);
+}
+
+// The largest width at which the given screens fit, stacked top to bottom.
+function fitWidth(indices) {
+  const landscape = window.matchMedia("(orientation: landscape) and (max-height: 540px)").matches;
+  const availW = previewPanel.clientWidth - 16;
+  const share = indices.length > 1 ? 0.56 : 0.42;   // "All" may use more of the pad's height
+  const availH = landscape ? previewPanel.clientHeight - 16 : trackpadView.clientHeight * share;
+  if (!layout || !indices.length) return Math.max(60, Math.min(availW, availH * 1.6));
+  const heightPerWidth = indices.reduce((sum, i) => sum + layout.rects[i].h / layout.rects[i].w, 0);
+  return Math.max(60, Math.min(availW, (availH - TILE_GAP * (indices.length - 1)) / heightPerWidth));
+}
+
+function requestPreview() {
+  if (!previewWanted()) return;
+  let indices = [0];
+  if (layout) indices = previewMode === ALL ? layout.rects.map((_, i) => i) : [Math.max(previewMode, 0)];
+  // Ask for exactly the size it's shown at. Two pixels per point is sharp enough for a
+  // preview and costs the Mac less than three.
+  const px = Math.round(fitWidth(indices) * Math.min(window.devicePixelRatio || 1, 2));
+  if (send(`i on ${px} ${previewMode}`) && !tiles.length) showPreviewMessage(null);
+}
+
+function stopPreview() {
+  if (previewOn) send("i off");
+}
+
+function setPreview(on) {
+  previewOn = on;
+  document.body.classList.toggle("previewing", on);
+  previewPanel.hidden = !on;
+  screenButton.classList.toggle("on", on);
+  screenButton.setAttribute("aria-pressed", String(on));
+  if (on) { sizeStage(); requestPreview(); }
+  else { send("i off"); clearTiles(); layout = null; }
+}
+screenButton.addEventListener("click", () => {
+  if (mode !== "trackpad") { setMode("trackpad"); if (previewOn) return; }
+  setPreview(!previewOn);
+});
+
+function choosePreview(next) {
+  if (next === previewMode && !(layout && layout.paused)) return;
+  previewMode = next;
+  try { localStorage.setItem(PREVIEW_MODE_KEY, String(next)); } catch {}
+  requestPreview();
+}
+
+function clearTiles() {
+  for (const img of tiles) { if (img && img.src) URL.revokeObjectURL(img.src); if (img) img.remove(); }
+  tiles = [];
+  boxes = [];
+  previewCursor.toggleAttribute("hidden", true);   // (an SVG element has no .hidden property)
+}
+
+function showPreviewMessage(text, button = "Try again") {
+  previewMsg.hidden = !text;
+  stage.hidden = !!text;
+  if (text) { previewMsg.querySelector("p").textContent = text; previewRetry.textContent = button; }
+}
+previewRetry.addEventListener("click", requestPreview);
+
+// "S <x> <y> <w> <h> <shown> <x,y,w,h>…", "S denied" or "S paused"
+function showLayout(parts) {
+  if (parts[1] === "denied") {
+    clearTiles();
+    showPreviewMessage("To show your screen here, Relay needs Screen Recording permission. On your Mac, open System Settings › Privacy & Security › Screen & System Audio Recording and turn on Relay. Then choose Restart Relay from the Relay icon in the menu bar.");
+    return;
+  }
+  if (parts[1] === "paused") {
+    clearTiles();
+    showPreviewMessage("Preview paused to save battery after 3 minutes without touching.", "Resume");
+    return;
+  }
+  const [x, y, w, h, shown] = parts.slice(1, 6).map(Number);
+  const rects = parts.slice(6).map((r) => { const [rx, ry, rw, rh] = r.split(",").map(Number); return { x: rx, y: ry, w: rw, h: rh }; });
+  layout = { x, y, w, h, shown, rects };
+  showPreviewMessage(null);
+  clearTiles();
+  for (const i of shownIndices()) {
+    const img = document.createElement("img");
+    img.alt = "";
+    img.className = "tile";
+    stage.insertBefore(img, previewCursor);
+    tiles[i] = img;
+  }
+  renderPicker();
+  sizeStage();
+}
+
+// Auto · 1 · 2 · All, only with more than one screen. In Auto, the screen being
+// followed is outlined.
+function renderPicker() {
+  previewTabs.innerHTML = "";
+  if (!layout || layout.rects.length < 2) return;
+  const choices = [[AUTO, "Auto", "Follow the cursor"],
+    ...layout.rects.map((_, i) => [i, String(i + 1), `Screen ${i + 1}`]), [ALL, "All", "All screens"]];
+  for (const [value, label, name] of choices) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.setAttribute("aria-label", name);
+    b.classList.toggle("on", value === previewMode);
+    b.classList.toggle("follow", previewMode === AUTO && value === layout.shown);
+    b.addEventListener("touchstart", (e) => { e.stopPropagation(); }, { passive: true });
+    b.addEventListener("touchend", (e) => { e.preventDefault(); e.stopPropagation(); choosePreview(value); });
+    previewTabs.appendChild(b);
+  }
+}
+
+// Lay the shown screens out on the stage: one screen fills the width; several are
+// stacked so each is as wide as it can be (side by side they'd be tiny on a phone).
+function sizeStage() {
+  if (!previewOn) return;
+  const indices = shownIndices();
+  const w = fitWidth(indices);
+  boxes = [];
+  let top = 0;
+  for (const i of indices) {
+    const r = layout.rects[i];
+    const h = (w * r.h) / r.w;
+    boxes[i] = { x: 0, y: top, w, h };
+    const img = tiles[i];
+    if (img) Object.assign(img.style, { left: "0px", top: `${top}px`, width: `${w}px`, height: `${h}px` });
+    top += h + TILE_GAP;
+  }
+  const height = indices.length ? top - TILE_GAP : w / 1.6;
+  stage.style.width = `${w}px`;
+  stage.style.height = `${height}px`;
+}
+window.addEventListener("resize", () => { sizeStage(); });
+
+// Which shown screen a stage position (CSS px) is on, and the Mac point there.
+function stageToMac(px, py) {
+  for (const i of shownIndices()) {
+    const b = boxes[i], r = layout.rects[i];
+    if (b && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+      return { x: r.x + ((px - b.x) / b.w) * r.w, y: r.y + ((py - b.y) / b.h) * r.h };
+    }
+  }
+  return null;
+}
+
+// "C x y": the Mac sends the cursor position on its own (frames don't include the
+// cursor), so moving it costs a few bytes instead of a new picture of the screen.
+function showCursor(x, y) {
+  if (!layout || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  for (const i of shownIndices()) {
+    const r = layout.rects[i], b = boxes[i];
+    if (b && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) {
+      previewCursor.style.left = `${b.x + ((x - r.x) / r.w) * b.w}px`;
+      previewCursor.style.top = `${b.y + ((y - r.y) / r.h) * b.h}px`;
+      previewCursor.toggleAttribute("hidden", false);
+      return;
+    }
+  }
+  previewCursor.toggleAttribute("hidden", true);
+}
+
+// Binary frame: 1 byte screen index, then a JPEG.
+function showFrame(buffer) {
+  const index = new Uint8Array(buffer, 0, 1)[0];
+  const img = tiles[index];
+  const ack = () => send(`i ack ${index}`);
+  if (!img) { ack(); return; }
+  const url = URL.createObjectURL(new Blob([new Uint8Array(buffer, 1)], { type: "image/jpeg" }));
+  const old = img.src;
+  img.onload = () => { if (old) URL.revokeObjectURL(old); img.classList.add("live"); ack(); };
+  img.onerror = () => { URL.revokeObjectURL(url); ack(); };
+  img.src = url;
+}
+
+// Tap the preview to put the cursor there; swipe sideways to show the next screen.
+let stageTouch = null;
+stage.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  stageTouch = { x: t.clientX, y: t.clientY, at: e.timeStamp };
+}, { passive: false });
+stage.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (!stageTouch || !layout) return;
+  const dx = t.clientX - stageTouch.x, dy = t.clientY - stageTouch.y;
+  const quick = e.timeStamp - stageTouch.at < 500;
+  stageTouch = null;
+  const count = layout.rects.length;
+  if (count > 1 && layout.shown >= 0 && Math.abs(dx) > 50 && Math.abs(dx) > 2 * Math.abs(dy)) {
+    choosePreview((layout.shown + (dx < 0 ? 1 : count - 1)) % count);
+    return;
+  }
+  if (Math.hypot(dx, dy) > TAP_MAX_TRAVEL || !quick) return;
+  const rect = stage.getBoundingClientRect();
+  const px = t.clientX - rect.left, py = t.clientY - rect.top;
+  const point = stageToMac(px, py);
+  if (!point) return;
+  send(`j ${point.x.toFixed(1)} ${point.y.toFixed(1)}`);
+  const dot = document.createElement("span");
+  dot.className = "ripple";
+  dot.style.left = `${px}px`;
+  dot.style.top = `${py}px`;
+  dot.addEventListener("animationend", () => dot.remove());
+  stage.appendChild(dot);
+}, { passive: false });
 
 // Block pinch-zoom and page rubber-banding everywhere except the pairing form.
 document.addEventListener("gesturestart", (e) => e.preventDefault());

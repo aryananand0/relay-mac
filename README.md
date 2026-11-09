@@ -25,6 +25,7 @@ The dot-grid icon in the Mac's menu bar shows Relay's state: one lit dot means r
 - **Keeping Mac awake… / Sleep timer… — Turn Off** appears while either is on, so you can cancel it from the Mac.
 - **Pause Relay** turns phones away, for example on hotel or guest Wi-Fi. It stays paused until you turn it off.
 - **Open Log**
+- **Restart Relay** is needed once, right after you allow Screen Recording (macOS applies that permission only when an app starts).
 - **Quit Relay** stops Relay until your next login.
 
 - **Mac asleep:** Relay can't reach a sleeping Mac (a web page can't wake one). It works whenever the Mac is awake, including with the display asleep; the first touch wakes the display.
@@ -38,6 +39,7 @@ The dot-grid icon in the Mac's menu bar shows Relay's state: one lit dot means r
 | No phone connected | 0% | 13 MB | none |
 | Phone open, not touching | 0% | 13 MB | none |
 | Finger moving | about 2% of one core | 13 MB | 120/s, only while moving |
+| Screen preview open, nothing happening | about 1% (Relay) + 0.7% (macOS capture) | | at most 1 frame/s, then 1 per 3 s |
 
 Relay holds no sleep assertions unless you turn on Keep Mac awake or a sleep timer (see below). Its input counts as user activity exactly like the real trackpad, so the Mac sleeps on its normal schedule. App Nap is turned off only while a phone is connected, so cursor timing stays exact.
 
@@ -61,6 +63,36 @@ The crosshair button at the top is **Find my cursor**: it moves the cursor to th
 Tap the sliders icon at the top right to change cursor speed, scroll speed, natural scrolling and the layout. Changes apply immediately and are saved on the phone. The same sheet can bring back the gesture tips. Finer tuning (acceleration curve, momentum, tap timings) is in constants at the top of `web/relay.js`.
 
 The Mac paces cursor motion at 120 Hz instead of moving whenever a Wi-Fi packet happens to arrive. That keeps motion even when Wi-Fi delivers packets late or in bunches, at a cost of about 4 ms of latency.
+
+## Screen preview
+
+Tap the screen button at the top to see the Mac's screen above the trackpad. Tap the preview to put the cursor there.
+
+With a TV or second display attached, the chips on the preview choose what you see:
+- **Auto** (the default) shows the screen your cursor is on, at full width, and switches by itself when the cursor moves to another screen. The followed screen's number is outlined.
+- **1, 2 …** pin one screen. Swipe sideways on the preview to flip to the next one.
+- **All** stacks every screen on top of each other, so each one is as wide as the phone allows. Side by side they'd be too small to read.
+
+Relay remembers your choice on the phone.
+
+The first time, Relay asks for Screen Recording permission: turn on Relay in System Settings › Privacy & Security › Screen & System Audio Recording, then choose **Restart Relay** from the menu bar icon. While the preview runs, macOS shows its purple recording indicator in the menu bar, so you can always tell.
+
+Built to cost as little power as possible:
+- **Off unless you open it.** Nothing is captured until you tap the button. Capture stops the moment you close the preview, switch to Remote or Mac, lock the phone, switch apps, or lose Wi-Fi. If the phone vanishes without saying goodbye, the Mac notices within about 7 seconds and stops. It's always off when you open Relay.
+- **One screen at a time.** Auto and pinned screens capture only the screen you're looking at, so a second display costs nothing extra.
+- **Only changes are sent.** A still screen sends nothing.
+- **Slows down when you don't need it.** Up to 6 frames per second for 1.5 s after you click, scroll or type, so you see the result. At most 1 per second while you're using Relay. After 30 seconds untouched, 1 every 3 seconds. After 3 minutes untouched the preview pauses itself; tap **Resume** to continue.
+- **The cursor travels separately.** Moving the cursor sends only its position (a few bytes, up to 20 times a second) and the phone draws it, instead of re-sending the whole screen.
+- **Small frames, cheap work.** macOS shrinks each frame on the GPU to exactly the size it's shown on the phone (at most 2 pixels per point). The hardware JPEG encoder takes about 1 ms per frame on a background (efficiency-core) queue. A new frame is sent only after the phone has shown the last one, so nothing ever queues up.
+
+Measured on the M4 MacBook Pro with the built-in screen and a 2560×1080 display, over 15 s (share of one CPU core):
+
+| | Relay | macOS capture service |
+|---|---|---|
+| Preview closed | 0% | 0% |
+| Auto, nothing happening | 0.8% | 0.7% |
+| All (two screens), nothing happening | 0.9% | 0.5% |
+| Auto while moving the cursor | about the same as moving the cursor without the preview | 0.2% |
 
 ## Layouts
 
@@ -113,10 +145,11 @@ Tap the keyboard button to open the iPhone keyboard. The trackpad stays usable a
 - **Local devices only:** connections are accepted only from private, link-local or same-subnet addresses.
 - **No Bonjour advertising:** Relay never advertises itself and never opens outbound connections.
 - **Relay's own page only:** browsers may open the control connection only from Relay's own page, so other websites can't try pairing codes.
+- **Screen preview:** a paired phone can see your screens while the preview is open. macOS's purple indicator shows whenever that's happening, and Pause Relay or closing the preview stops it.
 - **Clipboard:** a paired phone can read the Mac's clipboard text, but only when you tap **Get from Mac**. If you copy passwords on the Mac, keep in mind anyone with your pairing code could fetch one.
 - **Unencrypted traffic:** the pairing code and anything you type travel unencrypted over your Wi-Fi. Anyone on the same network who has its password could capture them. Pause Relay on Wi-Fi you don't trust.
 
 ## Development
 
-- `./tools/test.sh` runs the Mac-side checks against the running Relay: cursor movement, motion smoothness, scrolling, typing into a test window, volume (restored afterwards), keep awake and the sleep timer (dry run, so the Mac doesn't sleep), the clipboard (restored afterwards), and find my cursor. Add `--display` to also test turning the display off and waking it.
+- `./tools/test.sh` runs the Mac-side checks against the running Relay: cursor movement, motion smoothness, scrolling, typing into a test window, volume (restored afterwards), keep awake and the sleep timer (dry run, so the Mac doesn't sleep), the clipboard (restored afterwards), find my cursor, and the screen preview (at rest, and with two screens that Auto follows the cursor). Add `--display` to also test turning the display off and waking it.
 - `swift tools/make-icons.swift` redraws the logo: the iPhone icon, `web/logo.svg` and the Mac app icon.

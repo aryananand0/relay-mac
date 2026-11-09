@@ -27,6 +27,14 @@ import SystemConfiguration
 ///                   to every phone whenever it changes; see Power.message)
 ///   b <text>        put text on the Mac's clipboard (everything after "b ")
 ///   q clip          ask for the Mac's clipboard text   → "B <text>"
+///   i on <px> <n>   open the screen preview, each screen <px> wide on the phone; n: -2 follow
+///                   the cursor, -1 all screens, else that screen
+///                   → "S <desktop x y w h> <shown> <x,y,w,h per screen>" (again whenever the
+///                   followed screen changes), "S denied", or later "S paused" (untouched 3 min),
+///                   then binary frames: 1 byte screen index + JPEG, and "C x y" cursor positions
+///   i ack <n>       the phone has shown screen n's last frame (only then is the next sent)
+///   i off           close the screen preview
+///   j <x> <y>       put the cursor at a point in Mac screen points (tap on the preview)
 ///   p <token>       ping                               → "P <token> <ax>"  (ax: 1 if Accessibility granted)
 final class ControlServer {
     private let listener: NWListener
@@ -35,6 +43,12 @@ final class ControlServer {
     private let input: InputInjector
     private let keyboard: KeyboardInjector
     private let power: Power
+    private let preview = ScreenPreview()
+    /// The phone currently watching the screen preview (control queue).
+    private var previewOwner: ObjectIdentifier?
+    private var lastPreviewBoost: CFAbsoluteTime = 0
+    private var lastCursorSent: CFAbsoluteTime = 0
+    private var cursorTimer: DispatchWorkItem?
     private var sessions: [ObjectIdentifier: Session] = [:]
     private var controllers = 0
     /// Held only while a phone is connected: opts out of App Nap so input is
@@ -50,7 +64,10 @@ final class ControlServer {
         queue.async { [self] in
             paused = value
             Log.info(value ? "control: paused" : "control: resumed")
-            if value { for session in sessions.values { session.close(saying: "paused") } }
+            if value {
+                stopPreview()
+                for session in sessions.values { session.close(saying: "paused") }
+            }
         }
     }
 
@@ -85,6 +102,39 @@ final class ControlServer {
         self.power = power
     }
 
+    private func stopPreview() {
+        guard previewOwner != nil else { return }
+        previewOwner = nil
+        preview.stop()
+    }
+
+    /// Input from the phone watching the preview: show its effect promptly.
+    fileprivate func previewActivity(from session: Session) {
+        guard previewOwner == ObjectIdentifier(session) else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastPreviewBoost > 0.5 else { return }
+        lastPreviewBoost = now
+        preview.activity()
+    }
+
+    /// Tells the previewing phone where the cursor is: at most every 50 ms while it moves,
+    /// plus once shortly after it stops so the final position is exact.
+    fileprivate func previewCursorMoved() {
+        guard previewOwner != nil else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        cursorTimer?.cancel()
+        if now - lastCursorSent >= 0.05 {
+            lastCursorSent = now
+            preview.cursor(input.location)
+        }
+        let settle = DispatchWorkItem { [weak self] in
+            guard let self, self.previewOwner != nil else { return }
+            self.preview.cursor(self.input.location)
+        }
+        cursorTimer = settle
+        queue.asyncAfter(deadline: .now() + 0.08, execute: settle)
+    }
+
     /// Sends a message to every paired phone. Control queue only.
     func broadcast(_ message: String) {
         for session in sessions.values where session.authenticated { session.send(message) }
@@ -115,6 +165,7 @@ final class ControlServer {
 
     fileprivate func ended(_ session: Session) {
         guard sessions.removeValue(forKey: ObjectIdentifier(session)) != nil else { return }
+        if previewOwner == ObjectIdentifier(session) { stopPreview() }
         if session.authenticated {
             input.releaseAll()
             controllerCountChanged(by: -1)
@@ -202,7 +253,38 @@ final class ControlServer {
                 return
             }
 
+            // Clicks, scrolling and typing change the screen: show the result promptly. Plain
+            // cursor movement doesn't need new frames (its position is sent separately).
+            if "scdukt".contains(command) { server.previewActivity(from: self) }
+            if command == "m" || command == "j" { server.previewCursorMoved() }
+            if command == "f" {
+                for delay in [0.1, 0.3] {   // find my cursor jumps it to the centre
+                    server.queue.asyncAfter(deadline: .now() + delay) { [weak server] in server?.previewCursorMoved() }
+                }
+            }
             switch command {
+            case "i":
+                guard parts.count >= 2 else { return }
+                switch parts[1] {
+                case "on":
+                    let px = parts.count >= 3 ? Int(parts[2]) ?? 1000 : 1000
+                    let mode = ScreenPreview.Mode(parts.count >= 4 ? Int(parts[3]) ?? -2 : -2)
+                    server.previewOwner = ObjectIdentifier(self)
+                    server.preview.start(widthPx: px, mode: mode,
+                                         sendText: { [weak self] in self?.send($0) },
+                                         sendData: { [weak self] in self?.sendData($0) })
+                case "ack":
+                    if parts.count >= 3, let n = Int(parts[2]), server.previewOwner == ObjectIdentifier(self) {
+                        server.preview.ack(n)
+                    }
+                case "off":
+                    if server.previewOwner == ObjectIdentifier(self) { server.stopPreview() }
+                default: break
+                }
+            case "j":
+                guard parts.count >= 3, let x = Double(parts[1]), let y = Double(parts[2]),
+                      x.isFinite, y.isFinite, abs(x) < 100_000, abs(y) < 100_000 else { return }
+                server.input.moveTo(CGPoint(x: x, y: y))
             case "t":
                 if text.count > 2 { server.keyboard.type(String(text.dropFirst(2))) }
             case "k":
@@ -276,6 +358,7 @@ final class ControlServer {
                 }
                 if parts.count >= 3, parts[1] == "dryrun" { server.power.dryRun = parts[2] != "0" }
             case "p":
+                if server.previewOwner == ObjectIdentifier(self) { server.preview.heard() }
                 let token = parts.count >= 2 ? parts[1] : ""
                 send("P \(token) \(server.input.hasPermission ? 1 : 0)")
             default:
@@ -286,6 +369,13 @@ final class ControlServer {
         func close(saying message: String) {
             send(message)
             server.queue.asyncAfter(deadline: .now() + 0.3) { [connection] in connection.cancel() }
+        }
+
+        func sendData(_ data: Data) {
+            let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
+            let context = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
+            connection.send(content: data, contentContext: context, isComplete: true,
+                            completion: .contentProcessed { _ in })
         }
 
         func send(_ text: String) {
