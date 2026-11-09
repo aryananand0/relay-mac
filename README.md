@@ -1,155 +1,231 @@
-# Relay
+<p align="center">
+  <img src="web/logo.svg" width="104" height="104" alt="Relay logo: a grid of dots with one lit amber dot">
+</p>
 
-Use your iPhone as a trackpad, keyboard and media remote for your Mac over your home Wi-Fi. Free, local, nothing hosted.
+<h1 align="center">Relay</h1>
 
-- **Mac:** `Relay.app` is a small Swift background helper. It serves the phone page on port 8765, receives input over a WebSocket on port 8766, and posts real input events through Core Graphics.
-- **iPhone:** a plain HTML/JS web app, added to the Home Screen.
+<p align="center">
+  <strong>Your iPhone as a trackpad, keyboard and remote for your Mac.</strong>
+</p>
 
-## Set up once
+<p align="center">
+  Drive a Mac from the sofa or from bed, over your own Wi-Fi.<br>
+  Nothing to install on the phone, no account, no cloud. Just a small menu bar app and a page on your Home Screen.
+</p>
+
+<p align="center">
+  <sub>macOS 14 or later on Apple silicon&nbsp;&nbsp;·&nbsp;&nbsp;iPhone with Safari&nbsp;&nbsp;·&nbsp;&nbsp;No dependencies&nbsp;&nbsp;·&nbsp;&nbsp;End-to-end encrypted</sub>
+</p>
+
+<p align="center">
+  <a href="#get-started">Get started</a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#features">Features</a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#privacy-and-security">Privacy and security</a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#development">Development</a>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/assets/relay-hero.png" width="900" alt="Three iPhone screens of Relay: the Remote with play, skip and volume controls; the Trackpad with a live preview of the Mac's screen above it; and the Mac tab with keep awake, sleep timer, clipboard and lock controls.">
+</p>
+
+## Why Relay
+
+Plug a Mac into a TV and the hardest part is the trackpad you left on the desk. Relay turns the phone already in your hand into a smooth, MacBook-style trackpad, a keyboard, and a remote with big buttons for whatever is playing.
+
+It runs entirely between your own two devices. The Mac serves the phone page itself, so there is no app to install from the App Store, nothing to sign up for, and nothing hosted anywhere. Tap the icon on your Home Screen, and you're in control within a second.
+
+## Features
+
+**Trackpad that feels like a Mac.** Pointer acceleration modelled on macOS, 120 Hz motion pacing that smooths over Wi-Fi hiccups, tap to click, two-finger scrolling with momentum, tap-and-drag, pinch to zoom, and three- or four-finger swipes for desktops, Mission Control and App Exposé.
+
+**A real keyboard.** The iPhone keyboard types straight into the Mac, including accents, emoji, dictation and predictive text. A row of extra keys adds esc, tab, arrows and sticky ⌃ ⌥ ⇧ ⌘ for shortcuts.
+
+**A remote for the evening.** Play/pause, skip and volume use the Mac's own media keys, so they work with YouTube, Netflix, Music and Spotify alike. The volume meter shows the Mac's actual level and output device.
+
+**See the screen.** A live preview of the Mac's screen sits above the trackpad. Tap anywhere on it to put the cursor there. With a TV or second display, Relay follows the screen your cursor is on.
+
+**Mac controls.** Keep the Mac awake through a long film, set a sleep timer that pauses playback and sleeps the Mac, send a link from your phone to the Mac's clipboard (or back), find a lost cursor, lock the Mac, or turn the display off.
+
+**Made to be left running.** Relay starts at login and sits in the menu bar. It uses no CPU while you're not touching the phone and never stops the Mac from sleeping on its own schedule.
+
+## A closer look
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/assets/relay-trackpad.png" alt="The Relay trackpad on iPhone, showing gesture tips: move, click, right click, scroll, zoom, drag, switch desktop and Mission Control.">
+      <p><strong>Trackpad.</strong> One finger moves, two scroll, three switch desktops. The tips fade after your first touch and can be brought back in Settings.</p>
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/assets/relay-screens.png" alt="Relay's screen preview showing two Mac displays stacked above the trackpad, with Auto, 1, 2 and All buttons.">
+      <p><strong>Every screen, readable.</strong> Auto shows the screen your cursor is on at full width. All stacks your displays, and 1 or 2 pins one.</p>
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/assets/relay-remote-mac.png" alt="The Remote and Mac tabs side by side.">
+      <p><strong>Remote and Mac tabs.</strong> Big targets for media and volume, plus keep awake, sleep timer, clipboard and lock.</p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/relay-landscape.png" width="720" alt="Relay in landscape: the screen preview on the left, a wide trackpad in the middle, and the Trackpad, Remote and Mac switcher in a column on the right.">
+</p>
+<p align="center"><sub>Turn the phone sideways for a wide trackpad. There's also a one-handed layout for either hand in Settings.</sub></p>
+
+<p align="center"><sub>Screenshots show the real phone interface, driven by a simulated Mac with made-up data (<a href="tools/screenshots">tools/screenshots</a>).</sub></p>
+
+## Get started
+
+You need:
+- a Mac with Apple silicon running macOS 14 or later, with the Xcode command-line tools (`xcode-select --install`)
+- an iPhone on the same Wi-Fi network
+
+Relay doesn't have a downloadable release yet, so you build it from source. That takes about a minute.
+
+**1. Install.** Download or clone this repository, then in Terminal, from its folder:
 
 ```bash
-./scripts/install.sh   # builds Relay, installs it to ~/Applications, starts it now and at every login
-./scripts/pair.sh      # shows a QR code to scan with your iPhone camera
+./scripts/install.sh
 ```
 
-1. **Accessibility:** enable Relay in System Settings › Privacy & Security › Accessibility. Without this, the cursor won't move, and the phone shows a warning.
-2. **Firewall:** when the iPhone first connects, macOS asks whether Relay may accept incoming connections. Click **Allow**.
-3. **iPhone:** scan the QR code, then tap Share › Add to Home Screen. The icon has the pairing code built in.
+This builds Relay, installs it to `~/Applications/Relay.app`, and starts it now and at every login. A dot-grid icon appears in your menu bar.
 
-## Every day after that
+**2. Allow access.** macOS asks for two permissions the first time:
+- **Accessibility**, so Relay can move the cursor and type. Turn on Relay in System Settings › Privacy & Security › Accessibility.
+- **Incoming connections**, when the iPhone first connects. Click **Allow**.
 
-Tap Relay on your Home Screen. That's it: Relay starts with your Mac, and the page reconnects within a fraction of a second whenever you open it. Safari doesn't need to stay open.
+**3. Pair your iPhone.**
 
-The dot-grid icon in the Mac's menu bar shows Relay's state: one lit dot means ready, all dots lit means a phone is connected, and dimmed means paused. Its menu has:
-- **Show Pairing Code…** opens the QR page.
-- **Keeping Mac awake… / Sleep timer… — Turn Off** appears while either is on, so you can cancel it from the Mac.
-- **Pause Relay** turns phones away, for example on hotel or guest Wi-Fi. It stays paused until you turn it off.
-- **Open Log**
-- **Restart Relay** is needed once, right after you allow Screen Recording (macOS applies that permission only when an app starts).
-- **Quit Relay** stops Relay until your next login.
+```bash
+./scripts/pair.sh
+```
 
-- **Mac asleep:** Relay can't reach a sleeping Mac (a web page can't wake one). It works whenever the Mac is awake, including with the display asleep; the first touch wakes the display.
-- **Other scripts:** `./scripts/stop.sh` stops Relay until the next login, and `./scripts/uninstall.sh` removes it. Re-run `install.sh` after changing the code.
-- **Files:** the pairing code is in `~/Library/Application Support/Relay/pairing-code` (delete it and re-run `install.sh` for a new one). The log is at `~/Library/Logs/Relay/relay.log`.
+This opens a QR code on the Mac (or choose **Show Pairing Code…** from the menu bar icon). Scan it with the iPhone camera, then in Safari tap **Share › Add to Home Screen**. The icon pairs itself.
 
-## Resource use (measured on an M4 MacBook Pro)
+From then on, tap **Relay** on your Home Screen. That's it.
 
-| State | CPU | Memory | Timer wakeups |
-|---|---|---|---|
-| No phone connected | 0% | 13 MB | none |
-| Phone open, not touching | 0% | 13 MB | none |
-| Finger moving | about 2% of one core | 13 MB | 120/s, only while moving |
-| Screen preview open, nothing happening | about 1% (Relay) + 0.7% (macOS capture) | | at most 1 frame/s, then 1 per 3 s |
+> [!NOTE]
+> The screen preview needs one more permission the first time you open it: **Screen & System Audio Recording**. Turn on Relay there, then choose **Restart Relay** from the menu bar icon.
 
-Relay holds no sleep assertions unless you turn on Keep Mac awake or a sleep timer (see below). Its input counts as user activity exactly like the real trackpad, so the Mac sleeps on its normal schedule. App Nap is turned off only while a phone is connected, so cursor timing stays exact.
+<details>
+<summary><strong>Gestures and controls</strong></summary>
 
-## Gestures
+<br>
 
 | Gesture | Action |
 |---|---|
-| One finger | Move the cursor (with pointer acceleration) |
+| One finger | Move the cursor |
 | Tap / tap twice | Click / double-click |
-| Tap, then touch again and move | Drag (the button is released when you lift) |
-| Two fingers | Scroll (natural direction); flick to glide |
+| Tap, then touch again and move | Drag |
+| Two fingers | Scroll, with momentum on a flick |
 | Two-finger tap | Right-click |
-| Pinch out / in | Zoom in / out (⌘+ / ⌘−, in browsers and most apps) |
-| Three or four fingers left / right | Switch desktop or full-screen app, like a MacBook |
-| Three or four fingers up | Mission Control |
-| Three or four fingers down | All windows of the current app (App Exposé) |
-| Hold **Click** and move with your other thumb | Drag across more than one swipe |
+| Pinch | Zoom in or out (⌘+ / ⌘−) |
+| Three or four fingers left / right | Switch desktop or full-screen app |
+| Three or four fingers up / down | Mission Control / App Exposé |
+| Hold **Click** and move with another finger | Long drags |
 
-The crosshair button at the top is **Find my cursor**: it moves the cursor to the middle of its screen and shakes it, so macOS briefly shows it large. This needs "Shake mouse pointer to locate", which is on by default (System Settings › Accessibility › Display › Pointer).
+- **Keyboard:** tap the keyboard button. Tap a modifier for the next key only, or double-tap it to lock it. Shortcuts use US key positions; typed text works with any layout.
+- **Remote:** play/pause, previous/next, skip back/forward (hold to repeat), volume and mute, plus Video full screen, Mission Control, Switch app, Spotlight, Previous/Next page and Turn display off. If your TV controls its own volume over HDMI, the meter tells you to use the TV's remote.
+- **Mac tab:**
+  - **Keep Mac awake** for 1 or 2 hours, or until you turn it off.
+  - **Sleep timer** of 15 to 90 minutes. It keeps the Mac on until then, pauses what's playing, and puts the Mac to sleep.
+  - **Clipboard:** paste into the box, then **Send to Mac** or **Send & paste**. **Get from Mac** fetches the Mac's text and **Copy to iPhone** copies it.
+  - **Find cursor**, **Lock Mac** and **Display off**.
+- **Screen preview:** the screen button in the top bar. **Auto** follows the cursor, **1**/**2** pin a screen (or swipe sideways), **All** stacks them. Tap the preview to move the cursor there.
+- **Settings** (sliders icon): cursor speed, scroll speed, natural scrolling, and a one-handed layout for either hand.
+- **Menu bar icon:** connection status, **Show Pairing Code…**, **New Pairing Code…**, **Pause Relay** (turns phones away, for example on guest Wi-Fi), **Open Log**, **Restart Relay** and **Quit Relay**.
 
-Tap the sliders icon at the top right to change cursor speed, scroll speed, natural scrolling and the layout. Changes apply immediately and are saved on the phone. The same sheet can bring back the gesture tips. Finer tuning (acceleration curve, momentum, tap timings) is in constants at the top of `web/relay.js`.
+</details>
 
-The Mac paces cursor motion at 120 Hz instead of moving whenever a Wi-Fi packet happens to arrive. That keeps motion even when Wi-Fi delivers packets late or in bunches, at a cost of about 4 ms of latency.
+<details>
+<summary><strong>Battery and resource use</strong></summary>
 
-## Screen preview
+<br>
 
-Tap the screen button at the top to see the Mac's screen above the trackpad. Tap the preview to put the cursor there.
+Relay is built to cost nothing while you're not using it. Measured on an M4 MacBook Pro, as a share of one CPU core:
 
-With a TV or second display attached, the chips on the preview choose what you see:
-- **Auto** (the default) shows the screen your cursor is on, at full width, and switches by itself when the cursor moves to another screen. The followed screen's number is outlined.
-- **1, 2 …** pin one screen. Swipe sideways on the preview to flip to the next one.
-- **All** stacks every screen on top of each other, so each one is as wide as the phone allows. Side by side they'd be too small to read.
-
-Relay remembers your choice on the phone.
-
-The first time, Relay asks for Screen Recording permission: turn on Relay in System Settings › Privacy & Security › Screen & System Audio Recording, then choose **Restart Relay** from the menu bar icon. While the preview runs, macOS shows its purple recording indicator in the menu bar, so you can always tell.
-
-Built to cost as little power as possible:
-- **Off unless you open it.** Nothing is captured until you tap the button. Capture stops the moment you close the preview, switch to Remote or Mac, lock the phone, switch apps, or lose Wi-Fi. If the phone vanishes without saying goodbye, the Mac notices within about 7 seconds and stops. It's always off when you open Relay.
-- **One screen at a time.** Auto and pinned screens capture only the screen you're looking at, so a second display costs nothing extra.
-- **Only changes are sent.** A still screen sends nothing.
-- **Slows down when you don't need it.** Up to 6 frames per second for 1.5 s after you click, scroll or type, so you see the result. At most 1 per second while you're using Relay. After 30 seconds untouched, 1 every 3 seconds. After 3 minutes untouched the preview pauses itself; tap **Resume** to continue.
-- **The cursor travels separately.** Moving the cursor sends only its position (a few bytes, up to 20 times a second) and the phone draws it, instead of re-sending the whole screen.
-- **Small frames, cheap work.** macOS shrinks each frame on the GPU to exactly the size it's shown on the phone (at most 2 pixels per point). The hardware JPEG encoder takes about 1 ms per frame on a background (efficiency-core) queue. A new frame is sent only after the phone has shown the last one, so nothing ever queues up.
-
-Measured on the M4 MacBook Pro with the built-in screen and a 2560×1080 display, over 15 s (share of one CPU core):
-
-| | Relay | macOS capture service |
+| State | CPU | Notes |
 |---|---|---|
-| Preview closed | 0% | 0% |
-| Auto, nothing happening | 0.8% | 0.7% |
-| All (two screens), nothing happening | 0.9% | 0.5% |
-| Auto while moving the cursor | about the same as moving the cursor without the preview | 0.2% |
+| Phone not connected, or connected and idle | 0% | 13 MB of memory, no timers running |
+| Moving the cursor | about 2–3% | 120 Hz pacing runs only while your finger moves |
+| Screen preview open, nothing changing | about 1%, plus about 0.7% for macOS's capture service | |
 
-## Layouts
+- **No sleep assertions.** Relay holds none unless you turn on Keep Mac awake or a sleep timer, so the Mac sleeps on its normal schedule.
+- **Screen preview economy:**
+  - It's off until you open it, and it stops when you close it, lock the phone or switch apps.
+  - Only the screen you're looking at is captured, and only changes are sent.
+  - The cursor travels as a few bytes instead of a new picture.
+  - It slows to one frame every 3 seconds after 30 seconds untouched, and pauses after 3 minutes.
 
-- **Landscape:** turn the phone sideways for a wide trackpad. The Trackpad / Remote / Mac switcher moves to a column on the right.
-- **One-handed:** in Settings › Layout, pick Left hand or Right hand. Everything moves to the bottom of the screen, and the Click button and keyboard button sit on your thumb's side. Landscape always uses the two-handed layout.
+</details>
 
-## Remote
+<details>
+<summary><strong>Stop or remove Relay</strong></summary>
 
-Switch to **Remote** in the bottom bar for big controls while watching. Relay remembers which mode you used last.
+<br>
 
-| Control | What it does on the Mac |
-|---|---|
-| Play/pause, previous, next | The keyboard's media keys, so they control whatever is playing (YouTube or Netflix in a browser, Music, Spotify) |
-| Skip back / forward | ← / → (YouTube: 5 s, Netflix: 10 s); hold to repeat |
-| Volume − / + / mute | The keyboard's volume keys; the meter shows the Mac's real volume and output device |
-| Video full screen | `f`, which works in YouTube and Netflix players |
-| Mission Control, Switch app, Spotlight | ⌃↑, ⌘Tab, ⌘Space |
-| Previous page / Next page | ⌘[ / ⌘] |
-| Turn display off | Displays sleep; the next touch on the phone wakes them |
+```bash
+./scripts/stop.sh            # stop until next login
+./scripts/uninstall.sh       # remove the app and login item (keeps your pairing code and log)
+./scripts/uninstall.sh --all # also remove the pairing code, settings and log
+```
 
-If your TV controls its own volume over HDMI, which macOS often can't change, the meter says so and you use the TV remote for volume.
+You can then remove Relay from System Settings › Privacy & Security › Accessibility and › Screen & System Audio Recording.
 
-## Mac tab
+</details>
 
-| Control | What it does |
-|---|---|
-| Keep Mac awake: 1 hour, 2 hours, Always | Stops the Mac and its display from going to sleep, so a film on the TV isn't interrupted. Off lets it sleep normally again. |
-| Sleep timer: 15 min to 90 min | Keeps the Mac on until then, then pauses whatever is playing (if sound is playing) and puts the Mac to sleep. It also turns Keep Mac awake off. |
-| Clipboard | Paste a link or text into the box (touch and hold › Paste), then **Send to Mac** puts it on the Mac's clipboard, or **Send & paste** also presses ⌘V. **Get from Mac** fetches the Mac's clipboard text into the box, and **Copy to iPhone** copies it to the phone. |
-| Find cursor, Lock Mac, Display off | Find cursor is the same as the top-bar button. Lock Mac presses ⌃⌘Q. Display off turns the screens off; the next touch wakes them. |
+## Privacy and security
 
-While Keep Mac awake or a sleep timer is on, a small chip at the top of every screen shows it ("Awake" or the minutes left). Tap the chip to open the Mac tab.
+Relay can control your Mac, so it is careful about who it talks to and what leaves your devices.
 
-- **Mac already asleep:** if the Mac sleeps anyway (for example the lid is closed with no TV attached), a timer that ended while it was asleep is dropped, so waking the Mac never puts it straight back to sleep.
-- **Why a box for the clipboard:** Safari only lets pages read or write the iPhone clipboard over https, and Relay's page is plain http. Pasting into a box works everywhere.
+- **Local only:** Relay accepts connections only from devices on your local network (private, link-local or same-subnet addresses). It never contacts the internet and has no accounts, analytics or telemetry. It doesn't advertise itself on the network either.
+- **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute.
+- **End-to-end encryption:** after pairing, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305, using keys derived from the pairing code. That covers what you type, the clipboard, and the screen preview. The code itself never crosses the network. Altered or replayed messages are rejected.
+- **Browser protections:**
+  - Only Relay's own page may open the control connection, so other websites can't reach it.
+  - The page runs under a strict Content Security Policy.
+  - The pairing page is shown only on the Mac itself.
+- **Permissions:**
+  - **Accessibility** to move the cursor and type.
+  - **Screen & System Audio Recording**, only if you use the screen preview. macOS shows its purple indicator whenever the preview is capturing.
+  - **Clipboard:** the Mac's clipboard is read only when you tap **Get from Mac**.
+- **Your data stays on your Mac and phone:**
+  - The pairing code is stored in `~/Library/Application Support/Relay/` and the log in `~/Library/Logs/Relay/`, both readable only by you. The code is never written to the log.
+  - The phone keeps the code and your settings in Safari's storage for the Home Screen app.
 
-## Keyboard
+Things to know:
+- **Guard the code:** anyone with your pairing code (or a photo of the QR code) can control your Mac. If it may have leaked, choose **New Pairing Code…** from the menu bar.
+- **Trusted networks:** the phone page itself is delivered over plain http from your Mac. Someone who controls the network could tamper with that page, so use Relay on networks you trust, and **Pause Relay** elsewhere.
+- **Older codes:** codes created by versions before end-to-end encryption are 8 characters. Replace them with **New Pairing Code…** for full strength.
 
-Tap the keyboard button to open the iPhone keyboard. The trackpad stays usable above it.
-
-- **Typing:** typed text goes straight to the Mac as Unicode, so accents, emoji and other languages work. Backspace (including hold-to-repeat), Return, paste, dictation and predictive-text suggestions are all forwarded.
-- **Toolbar:** **esc**, **tab**, the arrow keys (hold to repeat), and the modifiers **⌃ ⌥ ⇧ ⌘**.
-  - Tap a modifier to apply it to the next key only, for example ⌘ then `l` gives ⌘L.
-  - Double-tap a modifier to lock it. Tap it again to unlock.
-- **Layout note:** shortcuts use US key positions; plain typing doesn't depend on the layout.
-
-## Security
-
-- **Pairing code:** 8 characters, required before any input is accepted. Five wrong guesses lock that address out for 60 seconds.
-- **Local devices only:** connections are accepted only from private, link-local or same-subnet addresses.
-- **No Bonjour advertising:** Relay never advertises itself and never opens outbound connections.
-- **Relay's own page only:** browsers may open the control connection only from Relay's own page, so other websites can't try pairing codes.
-- **Screen preview:** a paired phone can see your screens while the preview is open. macOS's purple indicator shows whenever that's happening, and Pause Relay or closing the preview stops it.
-- **Clipboard:** a paired phone can read the Mac's clipboard text, but only when you tap **Get from Mac**. If you copy passwords on the Mac, keep in mind anyone with your pairing code could fetch one.
-- **Unencrypted traffic:** the pairing code and anything you type travel unencrypted over your Wi-Fi. Anyone on the same network who has its password could capture them. Pause Relay on Wi-Fi you don't trust.
+Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md).
 
 ## Development
 
-- `./tools/test.sh` runs the Mac-side checks against the running Relay: cursor movement, motion smoothness, scrolling, typing into a test window, volume (restored afterwards), keep awake and the sleep timer (dry run, so the Mac doesn't sleep), the clipboard (restored afterwards), find my cursor, and the screen preview (at rest, and with two screens that Auto follows the cursor). Add `--display` to also test turning the display off and waking it.
-- `swift tools/make-icons.swift` redraws the logo: the iPhone icon, `web/logo.svg` and the Mac app icon.
+```bash
+./scripts/install.sh            # build, install and restart after every change
+./tools/test.sh                 # end-to-end checks against the running app
+node tools/cryptotest.mjs       # phone-side crypto vs. Node's crypto (no Mac app needed)
+./scripts/check-repo.sh         # secret and personal-data checks
+git config core.hooksPath .githooks   # run those checks before every commit
+```
+
+`tools/test.sh` exercises the real app:
+- **security:** pairing, encryption, replay and tamper rejection, the web server's protections
+- **input:** cursor movement and smoothness, scrolling, and typing into its own test window
+- **system:** volume (restored afterwards), keep awake and the sleep timer (as a dry run), the clipboard (restored afterwards), find my cursor, and the screen preview
+
+Let it run without touching the Mac.
+
+| Path | What's there |
+|---|---|
+| `Sources/Relay/` | The Mac app, in Swift: web and control servers, input, encryption, screen preview, menu bar |
+| `web/` | The phone page: plain HTML, CSS and JavaScript, bundled into the app |
+| `scripts/` | Build, install, pair, stop and uninstall |
+| `tools/` | Tests, the icon generator, and the screenshot harness |
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, tests and conventions; please report security issues privately as described in [SECURITY.md](SECURITY.md).

@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Lays out the real phone page for README images: each screen is an exact-size frame of
+     index.html (with the simulated Mac), rounded, on a transparent background.
+     compose.html?shots=remote,preview,mac&feature=1   (feature = drawn slightly larger) -->
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; gap: 44px; }
+  .phone { flex: none; overflow: hidden; border-radius: 46px; background: #000;
+           box-shadow: 0 0 0 1.5px rgba(255,255,255,0.14), 0 24px 60px rgba(0,0,0,0.45); }
+  .phone.wide { border-radius: 30px; }
+  iframe { display: block; border: 0; }
+</style></head><body><script>
+  const q = new URLSearchParams(location.search);
+  const feature = Number(q.get("feature") ?? -1);
+  for (const [i, shot] of q.get("shots").split(",").entries()) {
+    const wide = shot === "landscape";
+    const [w, h] = wide ? [852, 393] : [393, 852];
+    const scale = i === feature ? 1.07 : 1;
+    const box = document.createElement("div");
+    box.className = wide ? "phone wide" : "phone";
+    box.style.width = `${w * scale}px`; box.style.height = `${h * scale}px`;
+    const frame = document.createElement("iframe");
+    frame.title = shot;
+    frame.width = w; frame.height = h;
+    frame.style.transform = `scale(${scale})`; frame.style.transformOrigin = "0 0";
+    frame.src = `index.html?shot=${shot}`;
+    box.appendChild(frame);
+    document.body.appendChild(box);
+  }
+</script></body></html>
