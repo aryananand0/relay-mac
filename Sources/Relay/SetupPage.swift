@@ -49,8 +49,9 @@ enum SetupPage {
                 <p>You can download it here instead, but on a network you don't control, someone could hand you a different certificate. <span class="warn">Before step 3, make sure it's genuine:</span> in Settings › General › VPN &amp; Device Management › Relay Local CA › More Details, the SHA‑256 fingerprint must match the one on your Mac's pairing page (Relay menu › Show Pairing Code…).</p>
                 <a class="button" href="Relay.mobileconfig">Download the certificate</a>
               </details></li>
-            <li><strong>Install it.</strong> Open Settings, tap <em>Profile Downloaded</em> near the top, then Install.</li>
-            <li><strong>Trust it.</strong> Settings › General › About › Certificate Trust Settings › turn on <em>Relay Local CA</em>.</li>
+            <li><strong>Install it</strong> (receiving it doesn't install it yet). Open Settings and tap <em>Profile Downloaded</em> near the top. Tap <em>Install</em>, then <em>Install</em> again on the warning, then <em>Install</em> once more in the pop-up. Do this within a few minutes, or iOS discards the download.
+              <p class="note" style="text-align:left;margin-top:8px">Installed correctly, it appears under Settings › General › VPN &amp; Device Management as <em>Relay Local CA</em> under “Configuration Profile”.</p></li>
+            <li><strong>Trust it.</strong> Settings › General › About, scroll all the way to the bottom, tap <em>Certificate Trust Settings</em>, turn on <em>Relay Local CA</em>, and tap Continue. (It only appears there once step 2 is done.)</li>
             <li><strong>Open Relay</strong> by scanning the second QR code on your Mac (Relay menu › <em>Show Pairing Code…</em>), then Share › Add to Home Screen.</li>
           </ol>
           <div id="status" class="status"><span class="dot"></span>Waiting for your iPhone to trust this Mac…</div>

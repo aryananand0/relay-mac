@@ -108,7 +108,9 @@ This opens the pairing page on the Mac (or choose **Show Pairing Code…** from 
    - **Recommended:** choose **Send Certificate to iPhone…** from the menu bar icon and pick your iPhone in AirDrop.
    - **No AirDrop?** Scan the first QR code to download it, and before trusting it, check that its fingerprint in iPhone Settings matches the one on the pairing page.
 
-   Then on the iPhone, open **Settings › Profile Downloaded › Install**, and turn it on under **Settings › General › About › Certificate Trust Settings**.
+   Then on the iPhone:
+   - **Install it:** receiving the profile doesn't install it. Open **Settings › Profile Downloaded**, then tap **Install** three times (the profile, the warning, the pop-up) within a few minutes.
+   - **Trust it:** go to **Settings › General › About**, scroll to the very bottom, tap **Certificate Trust Settings**, turn on **Relay Local CA** and tap **Continue**. It only appears there once the profile is installed.
 2. **Open Relay.** Scan the second QR code, then in Safari tap **Share › Add to Home Screen**. The icon pairs itself.
 
 From then on, tap **Relay** on your Home Screen. That's it.

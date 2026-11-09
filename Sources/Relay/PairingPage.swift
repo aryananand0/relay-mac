@@ -53,8 +53,8 @@ enum PairingPage {
               </ol>
               <div class="qr"><img alt="QR code that opens Relay's setup page on your iPhone" src="\(setupQR)"></div>
               <ol start="2">
-                <li>On the iPhone: Settings › Profile Downloaded › Install.</li>
-                <li>Settings › General › About › Certificate Trust Settings › turn on <em>Relay Local CA</em>.</li>
+                <li>On the iPhone: Settings › <em>Profile Downloaded</em> › Install › Install › Install (three taps; receiving the profile doesn't install it).</li>
+                <li>Settings › General › About › scroll to the bottom › Certificate Trust Settings › turn on <em>Relay Local CA</em> › Continue.</li>
               </ol>
               <p class="small" style="margin-top:12px">If you downloaded it instead of using AirDrop, check it's genuine before step 3: its SHA‑256 fingerprint (Settings › General › VPN &amp; Device Management › Relay Local CA › More Details) must be:</p>
               <div class="fp">\(escape(fingerprint))</div>
