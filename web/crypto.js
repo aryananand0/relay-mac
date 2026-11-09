@@ -3,19 +3,16 @@
 //
 // Safari only offers its built-in crypto (crypto.subtle) on https pages, and Relay's page is
 // served over plain http from the Mac, so the few primitives needed are implemented here:
-// SHA-256, HMAC-SHA256 and HKDF (RFC 2104, RFC 5869), and ChaCha20-Poly1305 (RFC 8439).
+// SHA-256, HMAC-SHA256, HKDF and PBKDF2 (RFC 2104, 5869, 8018), X25519 (RFC 7748) and
+// ChaCha20-Poly1305 (RFC 8439).
 // The Mac side uses Apple's CryptoKit; tools/cryptotest.mjs checks this file against Node's
 // crypto module byte for byte.
 //
-// Protocol (see Sources/Relay/SecureChannel.swift):
-//   Mac → phone   "n <16-byte nonce, hex>"                 (plaintext, on connect)
-//   phone → Mac   "a <16-byte nonce, hex> <proof, hex>"    (plaintext)
-//     keys  = HKDF-SHA256(ikm: pairing code, salt: macNonce ‖ phoneNonce, info: "relay v1", 96 bytes)
-//             → auth key ‖ phone→Mac key ‖ Mac→phone key
-//     proof = HMAC-SHA256(auth key, "relay-auth-v1")
-//   then every message in both directions is a binary frame sealed with ChaCha20-Poly1305
-//   under that direction's key, nonce = 4 zero bytes ‖ 64-bit big-endian message counter.
-//   The pairing code itself never crosses the network.
+// Protocol: see Sources/Relay/SecureChannel.swift, which this mirrors. In short, each
+// connection does a fresh X25519 exchange, mixes in the pairing code (stretched with PBKDF2),
+// proves knowledge of it with an HMAC, and then seals every message with ChaCha20-Poly1305.
+// The code never crosses the network, a recording of the traffic gives no way to test guesses
+// for it, and recorded sessions stay unreadable even if the code leaks later.
 const RelayCrypto = (() => {
   const encoder = new TextEncoder();
 
@@ -80,6 +77,83 @@ const RelayCrypto = (() => {
     const inner = block.map((b) => b ^ 0x36), outer = block.map((b) => b ^ 0x5c);
     return sha256(concat(outer, sha256(concat(inner, message))));
   }
+
+  // ---- SHA-256 compression on words, for a fast PBKDF2 ------------------------------
+  const W = new Uint32Array(64);   // reused: PBKDF2 calls this over a million times
+  function compress(state, w16, out) {
+    const w = W;
+    for (let i = 0; i < 16; i++) w[i] = w16[i];
+    for (let i = 16; i < 64; i++) {
+      const a = w[i - 15], b = w[i - 2];
+      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+      const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let a = state[0], b = state[1], c = state[2], d = state[3];
+    let e = state[4], f = state[5], g = state[6], h = state[7];
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    out[0] = state[0] + a; out[1] = state[1] + b; out[2] = state[2] + c; out[3] = state[3] + d;
+    out[4] = state[4] + e; out[5] = state[5] + f; out[6] = state[6] + g; out[7] = state[7] + h;
+  }
+  const IV = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                              0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const beWords = (bytes) => { const v = new DataView(bytes.buffer, bytes.byteOffset); return Uint32Array.from({ length: bytes.length / 4 }, (_, i) => v.getUint32(i * 4)); };
+
+  // PBKDF2-HMAC-SHA256 with a 32-byte output. Each iteration is two SHA-256 block
+  // compressions on precomputed HMAC states (about 0.5 s for 600 000 on an iPhone).
+  function pbkdf2(password, salt, iterations) {
+    let key = password.length > 64 ? sha256(password) : password;
+    const block = new Uint8Array(64); block.set(key);
+    const inner = new Uint32Array(8), outer = new Uint32Array(8);
+    compress(IV, beWords(block.map((b) => b ^ 0x36)), inner);
+    compress(IV, beWords(block.map((b) => b ^ 0x5c)), outer);
+    let u = beWords(hmac(password, concat(salt, new Uint8Array([0, 0, 0, 1]))));
+    const t = u.slice();
+    const msg = new Uint32Array(16); msg[8] = 0x80000000; msg[15] = (64 + 32) * 8;
+    const mid = new Uint32Array(8);
+    for (let i = 1; i < iterations; i++) {
+      msg.set(u); compress(inner, msg, mid);
+      msg.set(mid); compress(outer, msg, u);
+      for (let j = 0; j < 8; j++) t[j] ^= u[j];
+    }
+    const out = new Uint8Array(32), v = new DataView(out.buffer);
+    for (let j = 0; j < 8; j++) v.setUint32(j * 4, t[j]);
+    return out;
+  }
+
+  // ---- X25519 (RFC 7748), with BigInt for clarity; runs once per connection ----------
+  const P25519 = (1n << 255n) - 19n;
+  const mod = (x) => { const r = x % P25519; return r < 0n ? r + P25519 : r; };
+  function powMod(b, e) { let r = 1n; b = mod(b); while (e > 0n) { if (e & 1n) r = mod(r * b); b = mod(b * b); e >>= 1n; } return r; }
+  const leToBig = (bytes) => bytes.reduceRight((n, byte) => (n << 8n) | BigInt(byte), 0n);
+  function bigToLe(n) { const out = new Uint8Array(32); for (let i = 0; i < 32; i++) { out[i] = Number(n & 0xffn); n >>= 8n; } return out; }
+
+  function x25519(scalar, uBytes) {
+    const k = scalar.slice(); k[0] &= 248; k[31] &= 127; k[31] |= 64;
+    const kn = leToBig(k);
+    const u = uBytes.slice(); u[31] &= 127;
+    const x1 = mod(leToBig(u));
+    let x2 = 1n, z2 = 0n, x3 = x1, z3 = 1n, swap = 0n;
+    for (let t = 254n; t >= 0n; t--) {
+      const kt = (kn >> t) & 1n;
+      swap ^= kt;
+      if (swap) { [x2, x3] = [x3, x2]; [z2, z3] = [z3, z2]; }
+      swap = kt;
+      const A = mod(x2 + z2), AA = mod(A * A), B = mod(x2 - z2), BB = mod(B * B), E = mod(AA - BB);
+      const C = mod(x3 + z3), D = mod(x3 - z3), DA = mod(D * A), CB = mod(C * B);
+      x3 = mod((DA + CB) ** 2n); z3 = mod(x1 * mod((DA - CB) ** 2n));
+      x2 = mod(AA * BB); z2 = mod(E * (AA + 121665n * E));
+    }
+    if (swap) { [x2, x3] = [x3, x2]; [z2, z3] = [z3, z2]; }
+    return bigToLe(mod(x2 * powMod(z2, P25519 - 2n)));
+  }
+  const BASE = new Uint8Array(32); BASE[0] = 9;
 
   function hkdf(ikm, salt, info, length) {
     const prk = hmac(salt, ikm);
@@ -199,21 +273,33 @@ const RelayCrypto = (() => {
     return out;
   }
 
-  // Answers the Mac's "n <nonce>" challenge. Returns the "a …" reply and the session keys.
-  function handshake(code, macNonceHex) {
-    const macNonce = fromHex(macNonceHex);
-    if (!macNonce || macNonce.length !== 16) return null;
+  // The pairing code stretched with PBKDF2 under this Mac's salt. Slow on purpose, so it's
+  // computed once per Mac and code and cached by the page.
+  function stretchCode(code, saltHex, iterations) {
+    return pbkdf2(encoder.encode(code), fromHex(saltHex), iterations);
+  }
+
+  // Answers the Mac's challenge "n <nonce> <public key> <salt> <iterations>" (parsed by the
+  // caller) given the stretched code. Returns the "a …" reply and the session keys.
+  function handshake(stretched, macNonceHex, macPublicHex) {
+    const macNonce = fromHex(macNonceHex), macPublic = fromHex(macPublicHex);
+    if (!macNonce || macNonce.length !== 16 || !macPublic || macPublic.length !== 32) return null;
     const phoneNonce = crypto.getRandomValues(new Uint8Array(16));
-    const keys = hkdf(encoder.encode(code), concat(macNonce, phoneNonce), encoder.encode("relay v1"), 96);
-    const proof = hmac(keys.subarray(0, 32), encoder.encode("relay-auth-v1"));
+    const phoneSecret = crypto.getRandomValues(new Uint8Array(32));
+    const phonePublic = x25519(phoneSecret, BASE);
+    const shared = x25519(phoneSecret, macPublic);
+    if (shared.every((b) => b === 0)) return null;   // a low-order public key
+    const keys = hkdf(concat(shared, stretched), concat(macNonce, phoneNonce, macPublic, phonePublic),
+                      encoder.encode("relay v2"), 96);
+    const proof = hmac(keys.subarray(0, 32), encoder.encode("relay-auth-v2"));
     return {
-      reply: `a ${toHex(phoneNonce)} ${toHex(proof)}`,
+      reply: `a ${toHex(phoneNonce)} ${toHex(phonePublic)} ${toHex(proof)}`,
       sendKey: keys.slice(32, 64),
       receiveKey: keys.slice(64, 96),
     };
   }
 
-  return { sha256, hmac, hkdf, seal, open, handshake, toHex, fromHex };
+  return { sha256, hmac, hkdf, pbkdf2, x25519, BASE, stretchCode, seal, open, handshake, concat, toHex, fromHex };
 })();
 
 if (typeof module !== "undefined") module.exports = RelayCrypto;   // for tools/cryptotest.mjs

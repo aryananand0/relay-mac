@@ -1,11 +1,13 @@
+import CryptoKit
 import Foundation
 import Network
 import SystemConfiguration
 
 /// WebSocket endpoint the iPhone sends input commands to.
 ///
-/// Pairing and encryption (SecureChannel): Relay opens with "n <nonce>"; the phone answers
-/// "a <nonce> <proof>" (→ "no" or "paused" in plaintext on failure). From then on every
+/// Pairing and encryption (SecureChannel): Relay opens with "n <nonce> <public key> <salt>
+/// <iterations>"; the phone answers "a <nonce> <public key> <proof>" (→ "no" or "paused" in
+/// plaintext on failure). From then on every
 /// message both ways is encrypted; the commands below are what's inside. A phone that hasn't
 /// paired within 10 seconds is disconnected.
 ///
@@ -205,6 +207,8 @@ final class ControlServer {
         private(set) var authenticated = false
         private unowned let server: ControlServer
         private let macNonce = SecureChannel.randomNonce()
+        private let macSecret = Curve25519.KeyAgreement.PrivateKey()   // fresh for every connection
+        private let lockoutKey: String
         /// Set once paired. Guarded by sendLock for sending (frames come from another queue);
         /// opening only happens on the control queue.
         private var channel: SecureChannel?
@@ -214,6 +218,7 @@ final class ControlServer {
             self.connection = connection
             self.server = server
             peer = PeerPolicy.hostKey(connection.endpoint)
+            lockoutKey = PeerPolicy.lockoutKey(connection.endpoint)
         }
 
         func start(queue: DispatchQueue) {
@@ -225,7 +230,7 @@ final class ControlServer {
                 }
             }
             connection.start(queue: queue)
-            sendPlain("n \(macNonce.hex)")
+            sendPlain("n \(macNonce.hex) \(macSecret.publicKey.rawRepresentation.hex) \(server.pairing.stretchParameters)")
             receive()
             // Don't let unpaired connections linger.
             queue.asyncAfter(deadline: .now() + 10) { [weak self] in
@@ -266,7 +271,7 @@ final class ControlServer {
             }
         }
 
-        /// "a <phone nonce> <proof>": the phone proves it knows the pairing code.
+        /// "a <phone nonce> <phone public key> <proof>": the phone proves it knows the pairing code.
         private func pair(_ text: String) {
             if server.paused {
                 close(saying: "paused")
@@ -274,9 +279,11 @@ final class ControlServer {
             }
             let parts = text.split(separator: " ")
             var accepted: SecureChannel?
-            if parts.count == 3, parts[0] == "a", let phoneNonce = Data(hex: parts[1]), let proof = Data(hex: parts[2]) {
-                _ = server.pairing.authenticate(peer: peer) { code in
-                    accepted = SecureChannel.accept(code: code, macNonce: macNonce, phoneNonce: phoneNonce, proof: proof)
+            if parts.count == 4, parts[0] == "a", let phoneNonce = Data(hex: parts[1]),
+               let phonePublic = Data(hex: parts[2]), let proof = Data(hex: parts[3]) {
+                _ = server.pairing.authenticate(peer: lockoutKey) { stretched in
+                    accepted = SecureChannel.accept(stretched: stretched, macNonce: macNonce, macSecret: macSecret,
+                                                    phoneNonce: phoneNonce, phonePublic: phonePublic, proof: proof)
                     return accepted != nil
                 }
             }

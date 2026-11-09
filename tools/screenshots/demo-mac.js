@@ -6,13 +6,9 @@
 (() => {
   const DEMO_CODE = "DEMO2345KMNP";
   const shot = new URLSearchParams(location.search).get("shot") || "trackpad";
-  try {
-    localStorage.clear();
-    localStorage.setItem("relay.pairingCode", DEMO_CODE);
-    localStorage.setItem("relay.mode", { remote: "remote", mac: "mac" }[shot] || "trackpad");
-    if (shot !== "trackpad") localStorage.setItem("relay.hintSeen", "1");
-    localStorage.setItem("relay.previewMode", shot === "screens" ? "-1" : "-2");
-  } catch {}
+  // Several shots load side by side and share this origin's storage, so only the (identical)
+  // pairing code goes there; each shot's own state is applied after load, below.
+  try { localStorage.setItem("relay.pairingCode", DEMO_CODE); } catch {}
 
   const enc = new TextEncoder(), dec = new TextDecoder();
   const SCREENS = [{ x: 0, y: 0, w: 1512, h: 982 }, { x: 1512, y: -98, w: 1920, h: 1080 }];
@@ -42,7 +38,11 @@
     constructor() {
       this.readyState = 0; this.bufferedAmount = 0; this.binaryType = "arraybuffer";
       this.macNonce = crypto.getRandomValues(new Uint8Array(16));
-      setTimeout(() => { this.readyState = 1; this.deliver("n " + RelayCrypto.toHex(this.macNonce)); }, 30);
+      this.macSecret = crypto.getRandomValues(new Uint8Array(32));
+      this.macPublic = RelayCrypto.x25519(this.macSecret, RelayCrypto.BASE);
+      this.salt = crypto.getRandomValues(new Uint8Array(16));
+      const hello = ["n", this.macNonce, this.macPublic, this.salt].map((x) => typeof x === "string" ? x : RelayCrypto.toHex(x));
+      setTimeout(() => { this.readyState = 1; this.deliver(hello.join(" ") + " 600000"); }, 30);
     }
     deliver(data) { setTimeout(() => this.onmessage && this.onmessage({ data }), 5); }
     sendSealed(kind, bytes) {
@@ -52,8 +52,12 @@
     say(text) { this.sendSealed(0x54, enc.encode(text)); }
     send(data) {
       if (typeof data === "string") {          // the handshake
-        const [, nonceHex] = data.split(" ");
-        const keys = RelayCrypto.hkdf(enc.encode(DEMO_CODE), new Uint8Array([...this.macNonce, ...RelayCrypto.fromHex(nonceHex)]), enc.encode("relay v1"), 96);
+        const [, nonceHex, publicHex] = data.split(" ");
+        const phonePublic = RelayCrypto.fromHex(publicHex);
+        const shared = RelayCrypto.x25519(this.macSecret, phonePublic);
+        const stretched = RelayCrypto.stretchCode(DEMO_CODE, RelayCrypto.toHex(this.salt), 600000);
+        const keys = RelayCrypto.hkdf(RelayCrypto.concat(shared, stretched),
+          RelayCrypto.concat(this.macNonce, RelayCrypto.fromHex(nonceHex), this.macPublic, phonePublic), enc.encode("relay v2"), 96);
         this.fromPhone = keys.slice(32, 64); this.toPhone = keys.slice(64, 96); this.inCount = 0; this.outCount = 0;
         this.say("ok");
         return;
@@ -90,6 +94,10 @@
 
   // Per-shot setup once the real page has connected.
   window.addEventListener("load", () => setTimeout(() => {
+    setMode({ remote: "remote", mac: "mac" }[shot] || "trackpad");
+    hint.hidden = shot !== "trackpad";
+    hint.classList.remove("gone");
+    previewMode = shot === "screens" ? -1 : -2;
     if (["preview", "screens", "landscape"].includes(shot)) { setPreview(true); }
     if (shot === "mac") { $("clip-text").value = "https://example.com/recipes/weeknight-pasta"; }
   }, 400));

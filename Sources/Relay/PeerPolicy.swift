@@ -35,7 +35,20 @@ enum PeerPolicy {
         }
     }
 
-    /// Host part of an endpoint, used to key pairing lockouts.
+    /// Key for pairing lockouts: the IPv4 address, or the /64 network for IPv6 (a device can
+    /// pick any address within its /64, so per-address limits alone are easy to sidestep).
+    static func lockoutKey(_ endpoint: NWEndpoint) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "\(endpoint)" }
+        if case .ipv6(let addr) = host {
+            let b = [UInt8](addr.rawValue)
+            if b.count == 16, !(b[0..<10].allSatisfy { $0 == 0 } && b[10] == 0xff && b[11] == 0xff) {
+                return b[0..<8].map { String(format: "%02x", $0) }.joined() + "::/64"
+            }
+        }
+        return "\(host)"
+    }
+
+    /// Host part of an endpoint, for the log.
     static func hostKey(_ endpoint: NWEndpoint) -> String {
         if case let .hostPort(host, _) = endpoint { return "\(host)" }
         return "\(endpoint)"

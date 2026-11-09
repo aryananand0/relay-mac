@@ -30,11 +30,11 @@ The [Security section of the README](README.md#privacy-and-security) describes t
 
 - **Only local devices:** the Mac accepts connections only from private, link-local or same-subnet addresses. Relay never contacts the internet and has no accounts, cloud service or telemetry.
 - **Pairing code:** a phone must prove it knows the pairing code before anything is accepted. Five wrong attempts lock that address out for a minute.
-- **Encryption:** after pairing, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305, under keys derived from the pairing code. The code itself never crosses the network.
+- **Encryption:** each connection does a fresh X25519 exchange, authenticated by the pairing code stretched with PBKDF2 (600 000 rounds). Then everything is encrypted with ChaCha20-Poly1305. The code never crosses the network; recorded traffic can't be used to guess it offline or to decrypt past sessions.
 - **Browser isolation:** only Relay's own page may open the control connection, and the pairing page is served only to the Mac itself.
 
 Known limits, which are not vulnerabilities in themselves but are worth understanding:
 
 - **Pairing code strength:** anyone who has the pairing code (or a photo of the QR code) can control the Mac. Use **New Pairing Code…** in the menu bar if it may have leaked.
-- **Offline guessing:** someone who records the Wi-Fi traffic of a pairing could try to guess the code offline. New codes are 12 characters (about 59 bits) to make that impractical. Codes created by versions before this change were 8 characters, so replace those with **New Pairing Code…**.
+- **Active attackers:** someone who can intercept and alter traffic could try guesses against one captured pairing attempt; each guess costs 600 000 PBKDF2 rounds against a 12-character (about 59-bit) code. Pairing attempts are also rate-limited per address and globally.
 - **No server identity check:** the phone page itself is delivered over plain http from the Mac, so an attacker who controls the network could serve a modified page to a phone. Use Relay on networks you trust, and pause it elsewhere.

@@ -1,3 +1,4 @@
+import CommonCrypto
 import CryptoKit
 import Foundation
 
@@ -59,18 +60,44 @@ final class RelayClient: @unchecked Sendable {
     func cancel(with: CloseCode, reason: Data?) { task.cancel(with: .normalClosure, reason: nil) }
 
     private func pair(code: String) async throws {
-        guard case .string(let hello) = try await task.receive(), hello.hasPrefix("n "),
-              let macNonce = Self.bytes(hex: String(hello.dropFirst(2))) else { throw URLError(.badServerResponse) }
+        guard case .string(let hello) = try await task.receive() else { throw URLError(.badServerResponse) }
+        guard let reply = Self.answer(hello: hello, code: code) else { throw URLError(.badServerResponse) }
+        lock.withLock { sendKey = reply.sendKey; receiveKey = reply.receiveKey }
+        try await task.send(.string(reply.text))
+    }
+
+    /// Answers "n <nonce> <public key> <salt> <iterations>"; see SecureChannel.swift.
+    static func answer(hello: String, code: String, proofLabel: String = "relay-auth-v2")
+        -> (text: String, sendKey: SymmetricKey, receiveKey: SymmetricKey)? {
+        let p = hello.split(separator: " ")
+        guard p.count == 5, p[0] == "n", let macNonce = bytes(hex: String(p[1])), let macPublicRaw = bytes(hex: String(p[2])),
+              let salt = bytes(hex: String(p[3])), let iterations = UInt32(p[4]),
+              let macPublic = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: macPublicRaw) else { return nil }
+        let secret = Curve25519.KeyAgreement.PrivateKey()
+        guard let shared = try? secret.sharedSecretFromKeyAgreement(with: macPublic) else { return nil }
         let phoneNonce = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
-        let keys = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: Data(code.utf8)),
-                                          salt: macNonce + phoneNonce, info: Data("relay v1".utf8), outputByteCount: 96)
-        let k = keys.withUnsafeBytes { Data($0) }
-        let proof = Data(HMAC<SHA256>.authenticationCode(for: Data("relay-auth-v1".utf8), using: SymmetricKey(data: k[0..<32])))
-        lock.withLock {
-            sendKey = SymmetricKey(data: k[32..<64])
-            receiveKey = SymmetricKey(data: k[64..<96])
-        }
-        try await task.send(.string("a \(Self.hex(phoneNonce)) \(Self.hex(proof))"))
+        let phonePublic = secret.publicKey.rawRepresentation
+        let ikm = shared.withUnsafeBytes { Data($0) } + stretch(code, salt: salt, iterations: iterations)
+        let k = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: ikm),
+                                       salt: macNonce + phoneNonce + macPublicRaw + phonePublic,
+                                       info: Data("relay v2".utf8), outputByteCount: 96).withUnsafeBytes { Data($0) }
+        let proof = Data(HMAC<SHA256>.authenticationCode(for: Data(proofLabel.utf8), using: SymmetricKey(data: k[0..<32])))
+        return ("a \(hex(phoneNonce)) \(hex(phonePublic)) \(hex(proof))",
+                SymmetricKey(data: k[32..<64]), SymmetricKey(data: k[64..<96]))
+    }
+
+    private static var stretchCache: [String: Data] = [:]
+    static func stretch(_ code: String, salt: Data, iterations: UInt32) -> Data {
+        let id = "\(code)|\(hex(salt))|\(iterations)"
+        if let cached = stretchCache[id] { return cached }
+        var out = Data(count: 32)
+        let pw = Array(code.utf8).map { CChar(bitPattern: $0) }
+        _ = out.withUnsafeMutableBytes { o in salt.withUnsafeBytes { s in
+            CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), pw, pw.count, s.bindMemory(to: UInt8.self).baseAddress, salt.count,
+                                 CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), iterations, o.bindMemory(to: UInt8.self).baseAddress, 32)
+        } }
+        stretchCache[id] = out
+        return out
     }
 
     static func nonce(_ counter: UInt64) -> ChaChaPoly.Nonce {

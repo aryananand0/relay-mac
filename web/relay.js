@@ -47,7 +47,7 @@ const pairingInput = $("pairing-code"), pairingError = $("pairing-error");
 // ---- Pairing code storage ----------------------------------------------
 function loadCode() { try { return localStorage.getItem(CODE_KEY) || ""; } catch { return ""; } }
 function saveCode(c) { try { localStorage.setItem(CODE_KEY, c); } catch {} }
-function clearCode() { try { localStorage.removeItem(CODE_KEY); } catch {} }
+function clearCode() { try { localStorage.removeItem(CODE_KEY); localStorage.removeItem("relay.stretched"); } catch {} }
 
 let code = loadCode();
 const fromUrl = new URLSearchParams(location.hash.slice(1)).get("k");
@@ -107,9 +107,10 @@ function showOffline(title = OFFLINE_TITLE, detail = OFFLINE_DETAIL) {
   offline.hidden = false;
 }
 
-// Messages are end-to-end encrypted (web/crypto.js): Relay opens with a challenge, this page
-// proves it knows the pairing code without sending it, and from then on every message both
-// ways is sealed with ChaCha20-Poly1305. Anyone else on the Wi-Fi sees only ciphertext.
+// Messages are end-to-end encrypted (web/crypto.js): Relay opens with a challenge and a fresh
+// X25519 key, this page proves it knows the pairing code without sending it, and from then on
+// every message both ways is sealed with ChaCha20-Poly1305. Anyone else on the Wi-Fi sees only
+// ciphertext and can't use a recording to guess the code.
 let channel = null;   // { sendKey, receiveKey, sendCounter, receiveCounter } once the handshake is sent
 const textEncoder = new TextEncoder(), textDecoder = new TextDecoder();
 
@@ -131,17 +132,21 @@ function connect(immediate) {
     if (typeof ev.data === "string") {
       // Before pairing only: the challenge, or a refusal.
       const parts = ev.data.split(" ");
-      if (parts[0] === "n" && !channel) {
-        const hello = RelayCrypto.handshake(code, parts[1] || "");
-        if (!hello) { socket.close(); return; }
-        channel = { sendKey: hello.sendKey, receiveKey: hello.receiveKey, sendCounter: 0, receiveCounter: 0 };
-        socket.send(hello.reply);
+      if (parts[0] === "n" && !channel && parts.length === 5) {
+        channel = { pending: true };
+        withStretchedCode(parts[3], Number(parts[4]), (stretched) => {
+          if (ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+          const hello = stretched && RelayCrypto.handshake(stretched, parts[1], parts[2]);
+          if (!hello) { socket.close(); return; }
+          channel = { sendKey: hello.sendKey, receiveKey: hello.receiveKey, sendCounter: 0, receiveCounter: 0 };
+          socket.send(hello.reply);
+        });
       } else if (parts[0] === "no" || parts[0] === "paused") {
         handleMessage(socket, ev.data);
       }
       return;
     }
-    if (!channel) return;
+    if (!channel || channel.pending) return;
     const plain = RelayCrypto.open(channel.receiveKey, channel.receiveCounter, new Uint8Array(ev.data));
     if (!plain) { socket.close(); return; }   // altered or out of order: start over
     channel.receiveCounter++;
@@ -156,6 +161,27 @@ function connect(immediate) {
     retryTimer = setTimeout(() => connect(false), retryDelay);
     retryDelay = Math.min(retryDelay * 2, 3000);
   };
+}
+
+// The pairing code stretched with PBKDF2 (600 000 rounds, about half a second on an iPhone).
+// Done once per Mac and code, then kept with the code in this page's storage.
+const STRETCH_KEY = "relay.stretched";
+function withStretchedCode(saltHex, iterations, done) {
+  const id = `${saltHex}:${iterations}:${RelayCrypto.toHex(RelayCrypto.sha256(textEncoder.encode(code))).slice(0, 16)}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(STRETCH_KEY) || "null");
+    if (cached && cached.id === id) { done(RelayCrypto.fromHex(cached.key)); return; }
+  } catch {}
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 10_000_000 || !RelayCrypto.fromHex(saltHex)) {
+    done(null);
+    return;
+  }
+  setStatus("connecting", "Securing connection");
+  setTimeout(() => {   // let the status paint before the slow part
+    const stretched = RelayCrypto.stretchCode(code, saltHex, iterations);
+    try { localStorage.setItem(STRETCH_KEY, JSON.stringify({ id, key: RelayCrypto.toHex(stretched) })); } catch {}
+    done(stretched);
+  }, 30);
 }
 
 function handleMessage(socket, data) {

@@ -42,18 +42,34 @@ func curl(_ args: [String]) -> String {
 do {
     let t = raw()
     let hello = await text(t)
-    check(hello?.hasPrefix("n ") == true && hello?.count == 34, "Relay opens with a 16-byte challenge")
+    let fields = hello?.split(separator: " ") ?? []
+    check(fields.count == 5 && fields[1].count == 32 && fields[2].count == 64 && fields[3].count == 32
+          && (Int(fields[4]) ?? 0) >= 600_000,
+          "Relay opens with a nonce, a fresh X25519 key and PBKDF2 parameters (≥ 600 000 rounds)")
     try await t.send(.string("a \(code)"))
     check(await text(t) == "no", "sending the pairing code in plaintext is rejected")
     t.cancel(with: .normalClosure, reason: nil)
 }
-// 2. A wrong proof is rejected.
+// 2. A well-formed answer computed with the wrong code is rejected.
 do {
     let t = raw()
-    _ = await text(t)
-    try await t.send(.string("a \(String(repeating: "ab", count: 16)) \(String(repeating: "cd", count: 32))"))
-    check(await text(t) == "no", "a wrong proof is rejected")
+    let hello = await text(t) ?? ""
+    let wrongCode = String(code.reversed()) == code ? code + "X" : String(code.reversed())
+    try await t.send(.string(RelayClient.answer(hello: hello, code: wrongCode)?.text ?? "a 00 00 00"))
+    check(await text(t) == "no", "a proof made with the wrong code is rejected")
     t.cancel(with: .normalClosure, reason: nil)
+}
+// 2b. A replayed handshake from another connection is rejected (fresh keys every time).
+do {
+    let first = raw()
+    let hello1 = await text(first) ?? ""
+    let answer = RelayClient.answer(hello: hello1, code: code)!.text
+    first.cancel(with: .normalClosure, reason: nil)
+    let second = raw()
+    _ = await text(second)
+    try await second.send(.string(answer))
+    check(await text(second) == "no", "a handshake replayed onto a new connection is rejected")
+    second.cancel(with: .normalClosure, reason: nil)
 }
 // 3. The real handshake works (and resets the failure count).
 let client = RelayClient()
@@ -65,14 +81,10 @@ if case .string(let pong) = try await client.receive() { check(pong.hasPrefix("P
 // 4. After pairing: plaintext, replayed and altered messages end the connection.
 func pairedRaw() async throws -> (URLSessionWebSocketTask, SymmetricKey) {
     let t = raw()
-    guard let hello = await text(t), let macNonce = RelayClient.bytes(hex: String(hello.dropFirst(2))) else { throw URLError(.badServerResponse) }
-    let phoneNonce = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
-    let k = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: Data(code.utf8)), salt: macNonce + phoneNonce,
-                                   info: Data("relay v1".utf8), outputByteCount: 96).withUnsafeBytes { Data($0) }
-    let proof = Data(HMAC<SHA256>.authenticationCode(for: Data("relay-auth-v1".utf8), using: SymmetricKey(data: k[0..<32])))
-    try await t.send(.string("a \(RelayClient.hex(phoneNonce)) \(RelayClient.hex(proof))"))
+    guard let hello = await text(t), let reply = RelayClient.answer(hello: hello, code: code) else { throw URLError(.badServerResponse) }
+    try await t.send(.string(reply.text))
     _ = try await t.receive()   // encrypted "ok"
-    return (t, SymmetricKey(data: k[32..<64]))
+    return (t, reply.sendKey)
 }
 func sealed(_ text: String, _ key: SymmetricKey, _ counter: UInt64) -> Data {
     let box = try! ChaChaPoly.seal(Data("T".utf8) + Data(text.utf8), using: key, nonce: RelayClient.nonce(counter))

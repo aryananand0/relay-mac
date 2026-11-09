@@ -38,6 +38,33 @@ for (const n of sizes) {
   check(RC.open(key, counter, tampered) === null, `tampered rejected ${n}`);
 }
 
+// PBKDF2 against Node, including the 600 000 iterations Relay uses (timed).
+for (const iters of [1, 2, 1000]) {
+  const pw = rand(12), salt = rand(16);
+  check(eq(RC.pbkdf2(pw, salt, iters), crypto.pbkdf2Sync(pw, salt, iters, 32, "sha256")), `pbkdf2 ${iters}`);
+}
+{
+  const pw = new TextEncoder().encode("ABCDEFGHJKMN"), salt = rand(16);
+  const t0 = performance.now();
+  const ours = RC.pbkdf2(pw, salt, 600000);
+  const ms = performance.now() - t0;
+  check(eq(ours, crypto.pbkdf2Sync(pw, salt, 600000, 32, "sha256")), "pbkdf2 600000");
+  console.log(`pbkdf2 600000 iterations: ${Math.round(ms)} ms in Node`);
+}
+
+// X25519 against Node and RFC 7748 §5.2.
+const b64u = (s) => new Uint8Array(Buffer.from(s, "base64url"));
+for (let i = 0; i < 5; i++) {
+  const a = crypto.generateKeyPairSync("x25519"), b = crypto.generateKeyPairSync("x25519");
+  const aPriv = b64u(a.privateKey.export({ format: "jwk" }).d), aPub = b64u(a.publicKey.export({ format: "jwk" }).x);
+  const bPub = b64u(b.publicKey.export({ format: "jwk" }).x);
+  check(eq(RC.x25519(aPriv, RC.BASE), aPub), "x25519 public key");
+  check(eq(RC.x25519(aPriv, bPub), crypto.diffieHellman({ privateKey: a.privateKey, publicKey: b.publicKey })), "x25519 shared secret");
+}
+check(RC.toHex(RC.x25519(RC.fromHex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
+                         RC.fromHex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")))
+  === "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552", "RFC 7748 vector");
+
 // A published test vector too (RFC 4231, HMAC-SHA256 test case 2):
 check(RC.toHex(RC.hmac(new TextEncoder().encode("Jefe"), new TextEncoder().encode("what do ya want for nothing?")))
   === "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", "RFC 4231 case 2");

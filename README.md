@@ -181,8 +181,8 @@ You can then remove Relay from System Settings › Privacy & Security › Access
 Relay can control your Mac, so it is careful about who it talks to and what leaves your devices.
 
 - **Local only:** Relay accepts connections only from devices on your local network (private, link-local or same-subnet addresses). It never contacts the internet and has no accounts, analytics or telemetry. It doesn't advertise itself on the network either.
-- **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute.
-- **End-to-end encryption:** after pairing, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305, using keys derived from the pairing code. That covers what you type, the clipboard, and the screen preview. The code itself never crosses the network. Altered or replayed messages are rejected.
+- **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute, and more than 20 wrong attempts a minute from anywhere pause pairing.
+- **End-to-end encryption:** every connection does a fresh X25519 key exchange, authenticated by the pairing code (stretched with PBKDF2, 600 000 rounds). After that, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305: what you type, the clipboard and the screen preview. The code never crosses the network, and a recording of the traffic can't be used to guess it or to decrypt past sessions later. Altered or replayed messages are rejected.
 - **Browser protections:**
   - Only Relay's own page may open the control connection, so other websites can't reach it.
   - The page runs under a strict Content Security Policy.
@@ -197,8 +197,8 @@ Relay can control your Mac, so it is careful about who it talks to and what leav
 
 Things to know:
 - **Guard the code:** anyone with your pairing code (or a photo of the QR code) can control your Mac. If it may have leaked, choose **New Pairing Code…** from the menu bar.
-- **Trusted networks:** the phone page itself is delivered over plain http from your Mac. Someone who controls the network could tamper with that page, so use Relay on networks you trust, and **Pause Relay** elsewhere.
-- **Older codes:** codes created by versions before end-to-end encryption are 8 characters. Replace them with **New Pairing Code…** for full strength.
+- **Trusted networks:** encryption protects against anyone listening on the Wi-Fi. But the phone page itself is delivered over plain http, so someone who can actively intercept and alter network traffic could serve a modified page. Use Relay on networks you trust, and **Pause Relay** elsewhere.
+- **Older codes:** Relay replaces 8-character codes from older versions automatically; those phones scan the QR code once more.
 
 Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md).
 
