@@ -13,7 +13,7 @@ Thanks for helping. Relay stays deliberately small: a Swift menu bar app, a plai
 You need a Mac on Apple silicon with macOS 14 or later, the Xcode command-line tools (`xcode-select --install`), and an iPhone on the same Wi-Fi. Node is only needed for one test.
 
 ```bash
-git clone <your fork's URL> && cd Relay
+git clone <your fork's URL> && cd relay-mac
 git config core.hooksPath .githooks   # pre-commit secret checks and commit-message checks
 ./scripts/install.sh                   # build, install to ~/Applications, start
 ./scripts/pair.sh                      # QR code for your iPhone

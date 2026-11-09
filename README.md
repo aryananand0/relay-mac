@@ -86,9 +86,11 @@ You need:
 
 Relay doesn't have a downloadable release yet, so you build it from source. That takes about a minute.
 
-**1. Install.** Download or clone this repository, then in Terminal, from its folder:
+**1. Install.** In Terminal:
 
 ```bash
+git clone https://github.com/aryananand0/relay-mac.git
+cd relay-mac
 ./scripts/install.sh
 ```
 
