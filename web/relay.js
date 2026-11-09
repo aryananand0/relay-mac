@@ -166,16 +166,18 @@ function connect(immediate) {
 // The pairing code stretched with PBKDF2 (600 000 rounds, about half a second on an iPhone).
 // Done once per Mac and code, then kept with the code in this page's storage.
 const STRETCH_KEY = "relay.stretched";
+const MIN_ITERATIONS = 600_000;   // the protocol's floor: never stretch less, whatever the other end asks
 function withStretchedCode(saltHex, iterations, done) {
+  const salt = RelayCrypto.fromHex(saltHex);
+  if (!Number.isInteger(iterations) || iterations < MIN_ITERATIONS || iterations > 10_000_000 || !salt || salt.length !== 16) {
+    done(null);
+    return;
+  }
   const id = `${saltHex}:${iterations}:${RelayCrypto.toHex(RelayCrypto.sha256(textEncoder.encode(code))).slice(0, 16)}`;
   try {
     const cached = JSON.parse(localStorage.getItem(STRETCH_KEY) || "null");
     if (cached && cached.id === id) { done(RelayCrypto.fromHex(cached.key)); return; }
   } catch {}
-  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 10_000_000 || !RelayCrypto.fromHex(saltHex)) {
-    done(null);
-    return;
-  }
   setStatus("connecting", "Securing connection");
   setTimeout(() => {   // let the status paint before the slow part
     const stretched = RelayCrypto.stretchCode(code, saltHex, iterations);
