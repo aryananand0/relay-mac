@@ -21,6 +21,11 @@
     <div class="topbar-end">
       <span id="rtt" class="rtt"></span>
       <button id="power-chip" class="chip" hidden></button>
+      <button id="btn-air" class="icon-button" aria-label="Air mouse" aria-pressed="false">
+        <svg width="21" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 11.5V21l2.6-2.6 2 3.6 2-1-2-3.6H17z"/><path d="M5.2 8.2a7 7 0 0 1 13.6 0M8 9a4 4 0 0 1 8 0"/>
+        </svg>
+      </button>
       <button id="btn-screen" class="icon-button" aria-label="Show Mac screen" aria-pressed="false">
         <svg width="21" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/>
@@ -68,6 +73,10 @@
         <div><dt>Switch desktop</dt><dd>three fingers left or right</dd></div>
         <div><dt>Mission Control</dt><dd>three fingers up</dd></div>
       </dl>
+      <div id="air-hint" class="air-hint" hidden>
+        <strong>Air mouse</strong>
+        <span>Hold here and point at the screen · tap to click</span>
+      </div>
       <div id="offline" class="offline" hidden>
         <strong>Can't reach your Mac</strong>
         <span>Check that your Mac is awake and your iPhone is on the same Wi‑Fi.</span>
@@ -216,6 +225,10 @@
       <label class="setting">
         <span class="setting-label">Scroll speed <output id="set-scroll-value"></output></span>
         <input id="set-scroll" type="range" min="0.4" max="2.5" step="0.05">
+      </label>
+      <label class="setting">
+        <span class="setting-label">Air mouse speed <output id="set-air-value"></output></span>
+        <input id="set-air" type="range" min="0.4" max="2.5" step="0.05">
       </label>
       <label class="setting setting-toggle">
         <span class="setting-label">Natural scrolling<small>Content moves with your fingers, like a Mac trackpad</small></span>

@@ -30,7 +30,7 @@ const CODE_KEY = "relay.pairingCode";
 
 // ---- Settings (stored on the phone) ------------------------------------------
 const SETTINGS_KEY = "relay.settings";
-const DEFAULT_SETTINGS = { speed: 1, scroll: 1, natural: true, hand: "both" };
+const DEFAULT_SETTINGS = { speed: 1, scroll: 1, natural: true, hand: "both", airSpeed: 1 };
 const settings = (() => {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; }
   catch { return { ...DEFAULT_SETTINGS }; }
@@ -387,6 +387,7 @@ pad.addEventListener("touchstart", (e) => {
     };
   }
   gesture.maxFingers = Math.max(gesture.maxFingers, fingers);
+  if (fingers === 1 && gesture.maxFingers === 1) airTouchAt = performance.now();
   if (fingers === 1) { follow(e.targetTouches[0], e.timeStamp); speed = 0; }
   if (fingers >= 2 && !gesture.dragging) {
     gesture.dragCandidate = false;
@@ -451,6 +452,7 @@ pad.addEventListener("touchmove", (e) => {
   follow(touch, e.timeStamp);
   gesture.travel += dist;
   if (gesture.travel > TAP_MAX_TRAVEL) lastClick.button = -1;
+  if (airOn) return;   // with the air mouse on, pointing the phone moves the cursor, not the finger
 
   if (gesture.dragCandidate && !gesture.dragging && gesture.travel > DRAG_START_TRAVEL) {
     flushMove();
@@ -510,6 +512,7 @@ function endTouch(e) {
   e.preventDefault();
   if (!gesture) return;
   const remaining = e.targetTouches.length;
+  if (remaining === 0) airTouchAt = 0;
 
   // Leaving two-finger mode: flick into momentum if the fingers were still moving.
   if (pair && remaining < 2) {
@@ -770,6 +773,107 @@ const sheet = $("settings"), settingsButton = $("btn-settings");
 const speedInput = $("set-speed"), scrollInput = $("set-scroll"), naturalInput = $("set-natural");
 const speedValue = $("set-speed-value"), scrollValue = $("set-scroll-value");
 const handChoices = $("set-hand");
+const airInput = $("set-air"), airValue = $("set-air-value");
+
+// ---- Air mouse --------------------------------------------------------------
+// Point the phone to move the cursor, using the gyroscope. Only while a finger rests on the
+// pad ("hold to point"), so the cursor never drifts when the phone is put down; a quick tap
+// still clicks, and tap-then-hold-and-point drags. Works held flat like a remote or upright:
+// turning left/right is measured around the real vertical (from gravity), tilting up/down
+// around the phone's side-to-side axis. Motion sensors run only while the air mouse is on and
+// Relay is on screen. Safari offers them only on secure (HTTPS) pages, which Relay is.
+const AIR_START_MS = 180;      // a touch shorter than this is a tap, not aiming
+const AIR_DEADZONE = 2;        // deg/s; hand tremor below this is ignored
+const AIR_GAIN_SLOW = 14;      // screen points per degree for slow, precise pointing
+const AIR_GAIN_FAST = 42;      // … and for quick sweeps across the screen
+const airButton = $("btn-air"), airHint = $("air-hint");
+// (var, not let: touch handlers above read these while the page starts up.)
+var airOn = false;
+var airTouchAt = 0;            // when the aiming finger went down (0 = none)
+let airLastAt = 0;
+let airListening = false;
+
+function airAiming(now) {
+  return airOn && gesture && gesture.maxFingers === 1 && airTouchAt && now - airTouchAt > AIR_START_MS;
+}
+
+function onMotion(e) {
+  const r = e.rotationRate;
+  const now = performance.now();
+  if (!r || !airAiming(now)) { airLastAt = 0; return; }
+  const dt = airLastAt ? Math.min((now - airLastAt) / 1000, 0.05) : (e.interval > 1 ? e.interval / 1000 : e.interval || 1 / 60);
+  airLastAt = now;
+
+  // Which way is up, in the phone's own axes. The sign of gravity readings differs between
+  // browsers, so pick the direction that points out of the screen or the top edge, which is
+  // "up" for any sensible way of holding a pointer.
+  let ux = 0, uy = 0, uz = 1;
+  const g = e.accelerationIncludingGravity;
+  if (g && g.x != null) {
+    const n = Math.hypot(g.x, g.y, g.z) || 1;
+    ux = g.x / n; uy = g.y / n; uz = g.z / n;
+    if (uy + uz < 0) { ux = -ux; uy = -uy; uz = -uz; }
+  }
+  // rotationRate: beta about x (side to side), gamma about y (bottom to top), alpha about z
+  // (out of the screen), in degrees per second, counterclockwise positive.
+  const yaw = (r.beta || 0) * ux + (r.gamma || 0) * uy + (r.alpha || 0) * uz;   // turning left > 0
+  const pitch = r.beta || 0;                                                    // tipping up > 0
+  const rate = Math.hypot(yaw, pitch);
+  if (rate < AIR_DEADZONE) return;
+  const t = Math.min(Math.max((rate - 5) / 115, 0), 1);
+  const gain = settings.airSpeed * (AIR_GAIN_SLOW + (AIR_GAIN_FAST - AIR_GAIN_SLOW) * t * t * (3 - 2 * t));
+  if (gesture.dragCandidate && !gesture.dragging) {   // tap, then hold and point = drag
+    flushMove();
+    send("d 0 1");
+    gesture.dragging = true;
+  }
+  queue("m", -yaw * dt * gain, -pitch * dt * gain);
+}
+
+function listenToMotion(on) {
+  if (on === airListening) return;
+  airListening = on;
+  if (on) window.addEventListener("devicemotion", onMotion);
+  else window.removeEventListener("devicemotion", onMotion);
+}
+
+function showAirState(message) {
+  airButton.classList.toggle("on", airOn);
+  airButton.setAttribute("aria-pressed", String(airOn));
+  document.body.classList.toggle("air", airOn || !!message);
+  airHint.hidden = !airOn && !message;
+  airHint.querySelector("span").textContent = message || "Hold here and point at the screen · tap to click";
+  airHint.classList.toggle("warn", !!message);
+  if (message) setTimeout(() => { if (!airOn) { airHint.hidden = true; document.body.classList.remove("air"); } }, 4000);
+}
+
+async function setAir(on) {
+  if (on) {
+    if (typeof DeviceMotionEvent === "undefined" || !window.isSecureContext) {
+      showAirState("The air mouse needs Relay's secure page. Open Relay from the HTTPS QR code.");
+      return;
+    }
+    if (typeof DeviceMotionEvent.requestPermission === "function") {   // iOS asks once
+      let answer = "denied";
+      try { answer = await DeviceMotionEvent.requestPermission(); } catch {}
+      if (answer !== "granted") {
+        showAirState("Allow motion access to use the air mouse. If you said no, close and reopen Relay to be asked again.");
+        return;
+      }
+    }
+  }
+  airOn = on;
+  listenToMotion(on && document.visibilityState === "visible");
+  showAirState(null);
+}
+
+airButton.addEventListener("click", () => {
+  if (mode !== "trackpad") setMode("trackpad");
+  setAir(!airOn);
+});
+document.addEventListener("visibilitychange", () => {
+  listenToMotion(airOn && document.visibilityState === "visible" && mode === "trackpad");
+});
 
 function renderSettings() {
   speedInput.value = settings.speed;
@@ -777,6 +881,8 @@ function renderSettings() {
   naturalInput.checked = settings.natural;
   speedValue.textContent = `${Math.round(settings.speed * 100)}%`;
   scrollValue.textContent = `${Math.round(settings.scroll * 100)}%`;
+  airInput.value = settings.airSpeed;
+  airValue.textContent = `${Math.round(settings.airSpeed * 100)}%`;
   for (const b of handChoices.querySelectorAll("[data-hand]")) {
     b.classList.toggle("on", b.dataset.hand === settings.hand);
   }
@@ -804,6 +910,7 @@ $("settings-done").addEventListener("click", closeSettings);
 sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings(); });
 speedInput.addEventListener("input", () => { settings.speed = Number(speedInput.value); saveSettings(); renderSettings(); });
 scrollInput.addEventListener("input", () => { settings.scroll = Number(scrollInput.value); saveSettings(); renderSettings(); });
+airInput.addEventListener("input", () => { settings.airSpeed = Number(airInput.value); saveSettings(); renderSettings(); });
 naturalInput.addEventListener("change", () => { settings.natural = naturalInput.checked; saveSettings(); });
 for (const b of handChoices.querySelectorAll("[data-hand]")) {
   b.addEventListener("click", () => { settings.hand = b.dataset.hand; saveSettings(); renderSettings(); });
@@ -838,6 +945,9 @@ function setMode(next) {
   try { localStorage.setItem(MODE_KEY, mode); } catch {}
   if (mode === "remote") send("q vol");
   if (mode === "trackpad") requestPreview(); else stopPreview();
+  if (typeof listenToMotion === "function" && typeof airOn !== "undefined") {
+    listenToMotion(airOn && mode === "trackpad" && document.visibilityState === "visible");
+  }
 }
 
 for (const tab of document.querySelectorAll(".modes [data-mode]")) {
