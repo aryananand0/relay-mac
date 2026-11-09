@@ -22,13 +22,14 @@ let queue = DispatchQueue(label: "relay.control", qos: .userInteractive)
 let pairing = Pairing()
 let input = InputInjector(queue: queue)
 let keyboard = KeyboardInjector()
+let power = Power(queue: queue)
 let webServer: WebServer
 let controlServer: ControlServer
 
 do {
     webServer = try WebServer(port: webPort, root: resolveWebRoot(), queue: queue)
     controlServer = try ControlServer(port: controlPort, queue: queue, pairing: pairing, input: input,
-                                      keyboard: keyboard)
+                                      keyboard: keyboard, power: power)
 } catch {
     Log.info("Relay failed to start: \(error)")
     exit(1)
@@ -60,5 +61,11 @@ let menuBar = MenuBar(pairingURL: URL(string: "http://localhost:\(webPort)/pair"
 }
 controlServer.onControllersChanged = { count in
     DispatchQueue.main.async { menuBar.setConnected(count) }
+}
+menuBar.onCancelPower = { queue.async { power.cancelAll() } }
+power.onChange = {
+    controlServer.broadcast(power.message)
+    let summary = power.summary
+    DispatchQueue.main.async { menuBar.setPower(summary) }
 }
 app.run()

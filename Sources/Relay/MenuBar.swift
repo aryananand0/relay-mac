@@ -8,9 +8,12 @@ final class MenuBar: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: "Pause Relay", action: #selector(togglePause), keyEquivalent: "")
+    private let powerItem = NSMenuItem(title: "", action: #selector(cancelPower), keyEquivalent: "")
     private let pairingURL: URL
     private let onPause: (Bool) -> Void
     private var connected = 0
+    /// Turns off keep-awake and the sleep timer.
+    var onCancelPower: (() -> Void)?
     private(set) var paused = UserDefaults.standard.bool(forKey: MenuBar.pausedKey)
 
     init(pairingURL: URL, onPause: @escaping (Bool) -> Void) {
@@ -21,6 +24,9 @@ final class MenuBar: NSObject {
         let menu = NSMenu()
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        powerItem.target = self
+        powerItem.isHidden = true
+        menu.addItem(powerItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Show Pairing Code…", action: #selector(showPairing), keyEquivalent: "").target = self
         pauseItem.target = self
@@ -39,6 +45,17 @@ final class MenuBar: NSObject {
         connected = count
         refresh()
     }
+
+    /// summary: e.g. "Keeping Mac awake until 1:30 AM"; nil hides the item.
+    func setPower(_ summary: String?) {
+        powerItem.isHidden = summary == nil
+        if let summary {
+            let cancel = summary.hasPrefix("Sleep timer") ? "Cancel" : "Turn Off"
+            powerItem.title = "\(summary) — \(cancel)"
+        }
+    }
+
+    @objc private func cancelPower() { onCancelPower?() }
 
     private func refresh() {
         let state: MenuBarIcon.State = paused ? .paused : (connected > 0 ? .connected : .waiting)

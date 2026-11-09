@@ -17,6 +17,8 @@ const DOUBLE_CLICK_MS = 350;   // second tap within this window is a double-clic
 const DRAG_WINDOW_MS = 300;    // touch down this soon after a tap, then move = drag
 const DRAG_START_TRAVEL = 6;   // px the second touch must move before the drag starts
 const SWIPE_DISTANCE = 45;     // px three or four fingers must travel to trigger a swipe
+const PINCH_START = 24;        // px the fingers must spread or close (more than they slide) to zoom
+const PINCH_STEP = 60;         // px of spread per zoom step (one ⌘+ or ⌘−)
 
 const SCROLL_GAIN = 1.6;       // Mac scroll pixels per finger px at scroll speed 1
 const MOMENTUM_TAU_MS = 400;   // momentum decay time constant (bigger = glides longer)
@@ -28,7 +30,7 @@ const CODE_KEY = "relay.pairingCode";
 
 // ---- Settings (stored on the phone) ------------------------------------------
 const SETTINGS_KEY = "relay.settings";
-const DEFAULT_SETTINGS = { speed: 1, scroll: 1, natural: true };
+const DEFAULT_SETTINGS = { speed: 1, scroll: 1, natural: true, hand: "both" };
 const settings = (() => {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; }
   catch { return { ...DEFAULT_SETTINGS }; }
@@ -38,7 +40,7 @@ function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringif
 // ---- Elements -----------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const pad = $("pad"), conn = $("conn"), statusText = $("status-text"), rttText = $("rtt");
-const offline = $("offline"), hint = $("hint"), keyboardLabel = $("keyboard-label");
+const offline = $("offline"), hint = $("hint");
 const warning = $("warning"), pairing = $("pairing"), pairingForm = $("pairing-form");
 const pairingInput = $("pairing-code"), pairingError = $("pairing-error");
 
@@ -118,7 +120,9 @@ function connect(immediate) {
 
   socket.onopen = () => socket.send("a " + code);
   socket.onmessage = (ev) => {
-    const parts = String(ev.data).split(" ");
+    const data = String(ev.data);
+    if (data.startsWith("B ")) { showMacClipboard(data.slice(2)); return; }
+    const parts = data.split(" ");
     switch (parts[0]) {
       case "ok":
         authed = true;
@@ -126,6 +130,7 @@ function connect(immediate) {
         lastPong = performance.now();
         setStatus("ok", "Connected");
         ping();
+        send("q power");
         if (mode === "remote") send("q vol");
         break;
       case "no":
@@ -139,6 +144,9 @@ function connect(immediate) {
         break;
       case "v":
         showVolume(parts);
+        break;
+      case "W":
+        showPower(Number(parts[1]), Number(parts[2]));
         break;
       case "paused":
         setStatus("bad", "Paused on your Mac");
@@ -182,6 +190,7 @@ document.addEventListener("visibilitychange", () => {
     // The socket may look open but be dead after a suspend; verify quickly.
     const sentAt = performance.now();
     ping();
+    send("q power");                       // a timer may have ended while away
     if (mode === "remote") send("q vol");   // volume may have changed while away
     setTimeout(() => { if (lastPong < sentAt && ws) ws.close(); }, 1200);
   } else {
@@ -260,11 +269,12 @@ function click(button) {
 //   tap, then touch+move  drag (left button held until the finger lifts)
 //   two fingers           scroll, with momentum on a flick
 //   two-finger tap        right-click
+//   pinch                 zoom in/out (⌘+ / ⌘−, which browsers and most apps use)
 //   3–4 fingers           swipe like a MacBook: ←/→ switch desktops and full-screen apps,
 //                         ↑ Mission Control, ↓ the current app's windows (App Exposé)
-let gesture = null;   // { startedAt, maxFingers, travel, dragCandidate, dragging, scrolled, swipeFrom, swiped }
+let gesture = null;   // { startedAt, maxFingers, travel, spread, dragCandidate, dragging, scrolled, pinching, pinch, swipeFrom, swiped }
 let track = null;     // the finger driving the cursor: { id, x, y, t }
-let pair = null;      // two-finger centroid: { x, y, t, n }
+let pair = null;      // two-finger centroid and finger distance: { x, y, t, n, s }
 let speed = 0;        // smoothed one-finger speed, px/ms
 let scrollVelocity = { x: 0, y: 0 };
 let lastTapAt = -Infinity;
@@ -274,7 +284,9 @@ function findTouch(list, id) { for (const t of list) if (t.identifier === id) re
 function centroid(list, t) {
   let x = 0, y = 0;
   for (const touch of list) { x += touch.clientX; y += touch.clientY; }
-  return { x: x / list.length, y: y / list.length, t, n: list.length };
+  const s = list.length === 2
+    ? Math.hypot(list[0].clientX - list[1].clientX, list[0].clientY - list[1].clientY) : 0;
+  return { x: x / list.length, y: y / list.length, t, n: list.length, s };
 }
 
 function pointerGain(speed) {
@@ -288,9 +300,9 @@ pad.addEventListener("touchstart", (e) => {
   const fingers = e.targetTouches.length;
   if (!gesture) {
     gesture = {
-      startedAt: e.timeStamp, maxFingers: 0, travel: 0,
+      startedAt: e.timeStamp, maxFingers: 0, travel: 0, spread: 0,
       dragCandidate: fingers === 1 && e.timeStamp - lastTapAt < DRAG_WINDOW_MS,
-      dragging: false, scrolled: false, swipeFrom: null, swiped: false,
+      dragging: false, scrolled: false, pinching: false, pinch: 0, swipeFrom: null, swiped: false,
     };
   }
   gesture.maxFingers = Math.max(gesture.maxFingers, fingers);
@@ -318,11 +330,24 @@ pad.addEventListener("touchmove", (e) => {
   if (touches.length >= 2 && !gesture.dragging) {
     const c = centroid(touches, e.timeStamp);
     if (!pair || pair.n !== c.n) { pair = c; return; }
-    const dx = c.x - pair.x, dy = c.y - pair.y;
+    const dx = c.x - pair.x, dy = c.y - pair.y, ds = c.s - pair.s;
     const dt = Math.max(c.t - pair.t, 1);
     pair = c;
+    if (gesture.pinching) { trackPinch(ds); return; }
     gesture.travel += Math.hypot(dx, dy);
+    gesture.spread += ds;
+    // Pinch or scroll? Fingers spreading or closing more than they slide = pinch.
+    // (Holding one finger still and moving the other slides the centre half as far.)
+    const spread = Math.abs(gesture.spread);
+    if (!gesture.scrolled && c.n === 2 && spread >= PINCH_START && spread > 1.5 * gesture.travel) {
+      gesture.pinching = true;
+      gesture.travel = Infinity;   // never a tap
+      lastClick.button = -1;
+      trackPinch(gesture.spread);
+      return;
+    }
     if (gesture.travel < TAP_MAX_TRAVEL) return;   // still might be a two-finger tap
+    if (!gesture.scrolled && spread >= gesture.travel) return;   // not clear yet
     lastClick.button = -1;
     gesture.scrolled = true;
     scrollVelocity.x = scrollVelocity.x * 0.6 + (dx / dt) * 0.4;
@@ -387,6 +412,17 @@ function trackSwipe(c) {
   flushMove();
   send(SWIPES[direction]);
   ripple(false);
+}
+
+function trackPinch(ds) {
+  gesture.pinch += ds;
+  while (Math.abs(gesture.pinch) >= PINCH_STEP) {
+    const zoomIn = gesture.pinch > 0;
+    gesture.pinch -= zoomIn ? PINCH_STEP : -PINCH_STEP;
+    flushMove();
+    send(zoomIn ? "k = cmd" : "k - cmd");
+    ripple(!zoomIn);
+  }
 }
 
 function endTouch(e) {
@@ -580,14 +616,12 @@ if (window.visualViewport) {
 function enterKeyboardMode() {
   if (document.body.classList.contains("kb-open")) return;
   document.body.classList.add("kb-open");
-  keyboardLabel.textContent = "Done";
   resetInput();
   window.scrollTo(0, 0);
 }
 kbInput.addEventListener("focus", enterKeyboardMode);
 kbInput.addEventListener("blur", () => {
   document.body.classList.remove("kb-open");
-  keyboardLabel.textContent = "Keyboard";
   for (const m of MOD_ORDER) mods[m] = 0;
   renderMods();
   document.body.style.height = "";
@@ -654,6 +688,7 @@ for (const el of toolbar.querySelectorAll("button")) {
 const sheet = $("settings"), settingsButton = $("btn-settings");
 const speedInput = $("set-speed"), scrollInput = $("set-scroll"), naturalInput = $("set-natural");
 const speedValue = $("set-speed-value"), scrollValue = $("set-scroll-value");
+const handChoices = $("set-hand");
 
 function renderSettings() {
   speedInput.value = settings.speed;
@@ -661,6 +696,19 @@ function renderSettings() {
   naturalInput.checked = settings.natural;
   speedValue.textContent = `${Math.round(settings.speed * 100)}%`;
   scrollValue.textContent = `${Math.round(settings.scroll * 100)}%`;
+  for (const b of handChoices.querySelectorAll("[data-hand]")) {
+    b.classList.toggle("on", b.dataset.hand === settings.hand);
+  }
+  applyLayout();
+}
+
+// One-handed layout: everything sits at the bottom, with the main buttons on the
+// thumb's side. Only applies in portrait; landscape always uses both hands.
+function applyLayout() {
+  const body = document.body.classList;
+  body.toggle("one-hand", settings.hand !== "both");
+  body.toggle("hand-left", settings.hand === "left");
+  body.toggle("hand-right", settings.hand === "right");
 }
 
 function openSettings() {
@@ -676,6 +724,9 @@ sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings()
 speedInput.addEventListener("input", () => { settings.speed = Number(speedInput.value); saveSettings(); renderSettings(); });
 scrollInput.addEventListener("input", () => { settings.scroll = Number(scrollInput.value); saveSettings(); renderSettings(); });
 naturalInput.addEventListener("change", () => { settings.natural = naturalInput.checked; saveSettings(); });
+for (const b of handChoices.querySelectorAll("[data-hand]")) {
+  b.addEventListener("click", () => { settings.hand = b.dataset.hand; saveSettings(); renderSettings(); });
+}
 $("settings-reset").addEventListener("click", () => {
   Object.assign(settings, DEFAULT_SETTINGS);
   saveSettings();
@@ -689,15 +740,17 @@ $("settings-hints").addEventListener("click", () => {
   closeSettings();
 });
 
-// ---- Modes: Trackpad / Remote --------------------------------------------
+// ---- Modes: Trackpad / Remote / Mac -----------------------------------------
 const MODE_KEY = "relay.mode";
-const trackpadView = $("trackpad"), remoteView = $("remote");
+const trackpadView = $("trackpad"), remoteView = $("remote"), macView = $("mac");
 let mode = "trackpad";
 
 function setMode(next) {
-  mode = next === "remote" ? "remote" : "trackpad";
+  mode = ["remote", "mac"].includes(next) ? next : "trackpad";
   trackpadView.hidden = mode !== "trackpad";
   remoteView.hidden = mode !== "remote";
+  macView.hidden = mode !== "mac";
+  document.body.dataset.mode = mode;
   for (const tab of document.querySelectorAll(".modes [data-mode]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.mode === mode));
   }
@@ -709,8 +762,9 @@ for (const tab of document.querySelectorAll(".modes [data-mode]")) {
   tab.addEventListener("click", () => setMode(tab.dataset.mode));
 }
 try { setMode(localStorage.getItem(MODE_KEY) || "trackpad"); } catch { setMode("trackpad"); }
+applyLayout();
 
-// ---- Remote buttons -----------------------------------------------------
+// ---- Remote and Mac buttons ---------------------------------------------
 // Each button sends its data-cmd on touch-down, like a physical remote;
 // data-repeat buttons (volume, skip) repeat while held.
 for (const el of remoteView.querySelectorAll("button[data-cmd]")) {
@@ -718,7 +772,7 @@ for (const el of remoteView.querySelectorAll("button[data-cmd]")) {
   el.addEventListener("touchstart", (e) => {
     e.preventDefault();
     el.classList.add("down");
-    send(el.dataset.cmd);
+    sendCommand(el.dataset.cmd);
     if (el.hasAttribute("data-repeat")) {
       repeatTimer = setTimeout(function again() {
         send(el.dataset.cmd);
@@ -764,11 +818,121 @@ function showVolume(parts) {
   }
 }
 
+// The Mac tab can scroll, so its buttons act on a tap rather than on touch-down.
+for (const el of macView.querySelectorAll("button[data-cmd]")) {
+  el.addEventListener("click", () => sendCommand(el.dataset.cmd));
+}
+
+function sendCommand(cmd) {
+  const [kind, arg] = cmd.split(" ");
+  if (kind === "w" || kind === "z") choice[kind] = arg;   // remembered to highlight the choice
+  if (!send(cmd)) return;
+  if (kind === "f") showFound();
+}
+
+// ---- Find my cursor -------------------------------------------------------
+const findButton = $("btn-find");
+function showFound() {
+  findButton.classList.add("on");
+  setTimeout(() => findButton.classList.remove("on"), 700);
+}
+findButton.addEventListener("click", () => sendCommand("f"));
+
+// ---- Keep awake and sleep timer ("W <awake> <sleep>") ---------------------
+// awake: 0 off, -1 until turned off, else seconds left; sleep: 0 off, else seconds left.
+const powerChip = $("power-chip"), awakeState = $("awake-state"), sleepState = $("sleep-state");
+const choice = { w: null, z: null };
+let power = { awake: 0, sleep: 0, at: 0 };
+let powerTicker = null;
+
+function showPower(awake, sleep) {
+  if (!Number.isFinite(awake) || !Number.isFinite(sleep)) return;
+  power = { awake, sleep, at: performance.now() };
+  if (awake === 0) choice.w = "off"; else if (awake < 0) choice.w = "on";
+  if (sleep === 0) choice.z = "off";
+  clearInterval(powerTicker);
+  powerTicker = awake > 0 || sleep > 0 ? setInterval(renderPower, 10000) : null;
+  renderPower();
+}
+
+function secondsLeft(total) {
+  return Math.max(0, total - (performance.now() - power.at) / 1000);
+}
+function clock(seconds) {
+  return new Date(Date.now() + seconds * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function duration(seconds) {
+  const m = Math.max(1, Math.ceil(seconds / 60));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
+}
+
+function renderPower() {
+  const awake = power.awake > 0 ? secondsLeft(power.awake) : power.awake;
+  const sleep = power.sleep > 0 ? secondsLeft(power.sleep) : 0;
+  awakeState.textContent = awake === 0 ? "Off" : awake < 0 ? "Until you turn it off" : `Until ${clock(awake)}`;
+  sleepState.textContent = sleep > 0 ? `Sleeps at ${clock(sleep)}` : "Off";
+  awakeState.classList.toggle("live", awake !== 0);
+  sleepState.classList.toggle("live", sleep > 0);
+  for (const b of macView.querySelectorAll(".choices button[data-cmd]")) {
+    const [kind, arg] = b.dataset.cmd.split(" ");
+    b.classList.toggle("on", choice[kind] === arg);
+  }
+  // The chip in the top bar shows from every mode; tap it to open the Mac tab.
+  powerChip.hidden = awake === 0 && sleep === 0;
+  powerChip.innerHTML = sleep > 0
+    ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>${duration(sleep)}`
+    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>Awake`;
+  powerChip.setAttribute("aria-label", sleep > 0 ? `Sleep timer: ${duration(sleep)} left` : "Keeping Mac awake");
+}
+powerChip.addEventListener("click", () => setMode("mac"));
+renderPower();
+
+// ---- Clipboard -------------------------------------------------------------
+// Safari only allows clipboard access on https pages, so text goes through a box:
+// paste into it (touch and hold › Paste) to send, or get the Mac's text into it.
+const clipText = $("clip-text"), clipState = $("clip-state");
+let clipStateTimer = null;
+
+function setClipState(text) {
+  clipState.textContent = text;
+  clearTimeout(clipStateTimer);
+  if (text) clipStateTimer = setTimeout(() => { clipState.textContent = ""; }, 3000);
+}
+
+function sendClipboard(paste) {
+  const text = clipText.value;
+  if (!text) { setClipState("Paste something first"); return; }
+  if (!send("b " + text)) { setClipState("Not connected"); return; }
+  if (paste) send("k v cmd");
+  setClipState(paste ? "Pasted on your Mac" : "On your Mac's clipboard");
+  clipText.blur();
+}
+
+function showMacClipboard(text) {
+  clipText.value = text;
+  setClipState(text ? "From your Mac" : "Mac's clipboard has no text");
+}
+
+$("clip-send").addEventListener("click", () => sendClipboard(false));
+$("clip-paste").addEventListener("click", () => sendClipboard(true));
+$("clip-get").addEventListener("click", () => { if (!send("q clip")) setClipState("Not connected"); });
+$("clip-copy").addEventListener("click", () => {
+  if (!clipText.value) { setClipState("Nothing to copy"); return; }
+  clipText.focus();
+  clipText.select();
+  clipText.setSelectionRange(0, clipText.value.length);
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch {}
+  clipText.blur();
+  setClipState(copied ? "Copied to your iPhone" : "Select the text and tap Copy");
+});
+
 // Block pinch-zoom and page rubber-banding everywhere except the pairing form.
 document.addEventListener("gesturestart", (e) => e.preventDefault());
-// The pairing form and the settings sliders need normal touch handling.
+// The pairing form, the settings sliders and the Mac tab (which can scroll) need
+// normal touch handling.
 document.addEventListener("touchmove", (e) => {
-  if (pairing.hidden && sheet.hidden) e.preventDefault();
+  if (pairing.hidden && sheet.hidden && !e.target.closest(".mac")) e.preventDefault();
 }, { passive: false });
 
 connect(true);

@@ -178,6 +178,34 @@ final class InputInjector {
         declareActivity()
     }
 
+    /// Find my cursor: jumps to the middle of the screen it's on, then shakes it so macOS
+    /// briefly shows it large ("Shake mouse pointer to locate", on by default).
+    func locate() {
+        flushMotion()
+        let rect = Displays.containing(cursorLocation())
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        // Quick left-right strokes of shrinking width, ending on the centre.
+        let strokes = 14
+        for i in 0...strokes {
+            let amplitude = i == strokes ? 0 : 160 * (1 - Double(i) / Double(strokes + 4))
+            let x = center.x + (i % 2 == 0 ? amplitude : -amplitude)
+            queue.asyncAfter(deadline: .now() + Double(i) * 0.016) { [self] in
+                jump(to: CGPoint(x: x, y: center.y))
+            }
+        }
+    }
+
+    private func jump(to target: CGPoint) {
+        let from = cursorLocation()
+        let p = Displays.clamp(target)
+        position = p
+        lastMoveAt = CFAbsoluteTimeGetCurrent()
+        post(.mouseMoved, at: p, button: .left) { e in
+            e.setIntegerValueField(.mouseEventDeltaX, value: Int64((p.x - from.x).rounded()))
+            e.setIntegerValueField(.mouseEventDeltaY, value: Int64((p.y - from.y).rounded()))
+        }
+    }
+
     /// Called when a controller disconnects so no button is left stuck down.
     func releaseAll() {
         flushMotion()
@@ -231,6 +259,11 @@ enum Displays {
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return false }
         return ids.prefix(Int(count)).contains { CGDisplayIsAsleep($0) != 0 }
+    }
+
+    /// The display under p, or the main display.
+    static func containing(_ p: CGPoint) -> CGRect {
+        bounds().first { $0.contains(p) } ?? CGDisplayBounds(CGMainDisplayID())
     }
 
     static func clamp(_ p: CGPoint) -> CGPoint {

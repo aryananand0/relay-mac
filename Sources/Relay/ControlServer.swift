@@ -20,6 +20,13 @@ import SystemConfiguration
 ///   q vol           ask for volume status → "v <0-100|-> <muted 0|1> <output device name>"
 ///                   ("-" = this output's volume can't be changed from the Mac, e.g. a TV over HDMI)
 ///   y displaysleep  turn the displays off; the next input wakes them
+///   f               find my cursor: centre it on its screen and shake it so macOS enlarges it
+///   w <on|off|min>  keep the Mac awake until turned off, off, or for that many minutes
+///   z <off|min>     sleep timer: in that many minutes pause playback and sleep the Mac
+///   q power         ask for keep-awake/sleep-timer status → "W <awake> <sleep>" (also sent
+///                   to every phone whenever it changes; see Power.message)
+///   b <text>        put text on the Mac's clipboard (everything after "b ")
+///   q clip          ask for the Mac's clipboard text   → "B <text>"
 ///   p <token>       ping                               → "P <token> <ax>"  (ax: 1 if Accessibility granted)
 final class ControlServer {
     private let listener: NWListener
@@ -27,6 +34,7 @@ final class ControlServer {
     private let pairing: Pairing
     private let input: InputInjector
     private let keyboard: KeyboardInjector
+    private let power: Power
     private var sessions: [ObjectIdentifier: Session] = [:]
     private var controllers = 0
     /// Held only while a phone is connected: opts out of App Nap so input is
@@ -47,7 +55,7 @@ final class ControlServer {
     }
 
     init(port: UInt16, queue: DispatchQueue, pairing: Pairing, input: InputInjector,
-         keyboard: KeyboardInjector) throws {
+         keyboard: KeyboardInjector, power: Power) throws {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
@@ -55,7 +63,7 @@ final class ControlServer {
         }
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
-        ws.maximumMessageSize = 4096
+        ws.maximumMessageSize = SystemControls.clipboardLimit * 4 + 16   // clipboard text, UTF-8
         // Browsers always send Origin. Only Relay's own page (served from this Mac on the
         // web port) may open the control socket, so other web pages can't even try codes.
         let webPort = port - 1
@@ -74,6 +82,12 @@ final class ControlServer {
         self.pairing = pairing
         self.input = input
         self.keyboard = keyboard
+        self.power = power
+    }
+
+    /// Sends a message to every paired phone. Control queue only.
+    func broadcast(_ message: String) {
+        for session in sessions.values where session.authenticated { session.send(message) }
     }
 
     static func allowedOrigins(webPort: UInt16) -> Set<String> {
@@ -225,7 +239,30 @@ final class ControlServer {
                     }
                 }
             case "q":
-                if parts.count >= 2, parts[1] == "vol" { send(SystemControls.volumeStatus().message) }
+                guard parts.count >= 2 else { return }
+                switch parts[1] {
+                case "vol": send(SystemControls.volumeStatus().message)
+                case "power": send(server.power.message)
+                case "clip": send("B " + SystemControls.clipboardText())
+                default: break
+                }
+            case "b":
+                guard text.count > 2 else { return }
+                let clip = String(text.dropFirst(2).prefix(SystemControls.clipboardLimit))
+                SystemControls.setClipboard(clip)
+                Log.info("control: \(peer) set the clipboard (\(clip.count) characters)")
+            case "f":
+                server.input.locate()
+            case "w", "z":
+                guard parts.count >= 2 else { return }
+                let arg = String(parts[1])
+                let minutes: Double?
+                if arg == "off" { minutes = nil }
+                else if arg == "on", command == "w" { minutes = 0 }
+                else if let m = Double(arg), m > 0, m <= 24 * 60 { minutes = m }
+                else { return }
+                if command == "w" { server.power.keepAwake(minutes: minutes) }
+                else { server.power.sleepTimer(minutes: minutes) }
             case "y":
                 if parts.count >= 2, parts[1] == "displaysleep" {
                     Log.info("control: \(peer) turned the displays off")
@@ -237,6 +274,7 @@ final class ControlServer {
                 if parts.count >= 3, parts[1] == "reserve", let ms = Double(parts[2]), (0...50).contains(ms) {
                     server.input.reserve = ms / 1000
                 }
+                if parts.count >= 3, parts[1] == "dryrun" { server.power.dryRun = parts[2] != "0" }
             case "p":
                 let token = parts.count >= 2 ? parts[1] : ""
                 send("P \(token) \(server.input.hasPermission ? 1 : 0)")
@@ -250,7 +288,7 @@ final class ControlServer {
             server.queue.asyncAfter(deadline: .now() + 0.3) { [connection] in connection.cancel() }
         }
 
-        private func send(_ text: String) {
+        func send(_ text: String) {
             let meta = NWProtocolWebSocket.Metadata(opcode: .text)
             let context = NWConnection.ContentContext(identifier: "text", metadata: [meta])
             connection.send(content: Data(text.utf8), contentContext: context, isComplete: true,

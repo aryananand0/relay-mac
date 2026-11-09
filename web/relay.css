@@ -229,7 +229,7 @@ body.kb-open .clicks { height: 54px; }
   justify-content: space-evenly;
   gap: 14px;
 }
-.remote[hidden], .trackpad[hidden] { display: none; }
+.remote[hidden], .trackpad[hidden], .mac[hidden] { display: none; }
 
 .remote button {
   border: 0;
@@ -316,7 +316,7 @@ body.kb-open .shortcuts, body.kb-open .volume-note { display: none; }
   align-items: center;
   gap: 9px;
   height: 46px;
-  padding: 0 22px;
+  padding: 0 18px;
   border: 0;
   border-radius: 23px;
   background: var(--raised);
@@ -326,7 +326,9 @@ body.kb-open .shortcuts, body.kb-open .volume-note { display: none; }
   font-weight: 600;
 }
 .pill:active { background: var(--raised-down); }
+#keyboard-label { display: none; }
 body.kb-open .pill { background: var(--amber); color: var(--amber-ink); box-shadow: none; }
+body.kb-open #keyboard-label { display: inline; }
 
 /* ---- Hidden field that receives the iOS keyboard ----------------------- */
 #kb-input {
@@ -463,3 +465,181 @@ body.kb-open .pill { background: var(--amber); color: var(--amber-ink); box-shad
 }
 
 @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+/* ---- Top bar extras: find cursor, keep-awake / sleep-timer chip ------------ */
+#btn-find.on { color: var(--amber); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(217, 165, 91, 0.14);
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chip[hidden] { display: none; }
+
+/* ---- Mac tab ---------------------------------------------------------------- */
+.mac {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+.mac-group {
+  flex: none;
+  padding: 14px 14px 14px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.mac-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 2px 10px;
+  font-weight: 600;
+}
+.mac-state { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.mac-state.live { color: var(--amber); }
+.mac-note { margin: 9px 2px 0; color: var(--faint); font-size: 12px; }
+
+.choices { display: flex; gap: 6px; }
+.choices button {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.choices button.on { background: var(--amber); color: var(--amber-ink); box-shadow: none; }
+.choices button:active { background: var(--raised-down); }
+.choices button.on:active { background: var(--amber); }
+
+#clip-text {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  max-height: 96px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--black);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font: 16px/1.35 var(--font);   /* 16px: iOS doesn't zoom on focus */
+  resize: none;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
+}
+#clip-text::placeholder { color: var(--faint); }
+#clip-text:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--amber); }
+.clip-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+
+.clip-actions button, .mac-actions button {
+  height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.clip-actions button:active, .mac-actions button:active,
+.mac-actions button.down { background: var(--raised-down); box-shadow: inset 0 0 0 1px var(--line); }
+.mac-actions { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mac-actions button { height: 50px; border-radius: 14px; }
+
+.setting-choices { margin-top: 12px; }
+
+/* ---- One-handed (portrait): everything at the bottom, buttons on the thumb's side */
+@media (orientation: portrait) {
+  body.one-hand { justify-content: flex-end; }
+  body.one-hand .trackpad { flex: 0 1 60%; }
+  body.one-hand .remote, body.one-hand .mac { flex: 0 1 auto; }
+  body.one-hand.kb-open .trackpad { flex: 1; }
+  /* Right hand: the big Click button and the keyboard pill sit under the thumb. */
+  body.hand-right .clicks { flex-direction: row-reverse; }
+  body.hand-right .clicks #btn-right { border-left: 0; border-right: 1px solid var(--line); }
+  body.hand-left .dock, body.hand-left .topbar, body.hand-left .topbar-end { flex-direction: row-reverse; }
+}
+
+/* ---- Landscape: trackpad fills the screen, the dock becomes a side column ---- */
+@media (orientation: landscape) and (max-height: 540px) {
+  body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "top dock" "warn dock" "main dock" "keys dock";
+    gap: 8px 12px;
+    padding-top: calc(env(safe-area-inset-top) + 6px);
+    padding-bottom: calc(env(safe-area-inset-bottom) + 6px);
+  }
+  .topbar { grid-area: top; height: 26px; }
+  .notice { grid-area: warn; }
+  .trackpad, .remote, .mac { grid-area: main; }
+  .keys { grid-area: keys; }
+  .dock { grid-area: dock; flex-direction: column; }
+  .modes { flex-direction: column; flex: 1; border-radius: 20px; }
+  .modes button { border-radius: 17px; }
+  .pill { justify-content: center; height: 54px; padding: 0; }
+  .clicks { height: 54px; }
+  .hint { font-size: 12px; gap: 4px; }
+
+  .remote {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-content: center;
+    gap: 14px 22px;
+  }
+  .remote[hidden] { display: none; }
+  .transport { grid-row: 1 / span 2; align-self: center; gap: 14px; }
+  .transport .play { width: 96px; height: 96px; }
+  .transport-row { gap: 10px; }
+  .transport-row button { width: 52px; height: 46px; }
+  .shortcuts { grid-template-columns: repeat(3, 1fr); gap: 6px; align-content: start; }
+  .shortcuts button { height: 40px; font-size: 13px; }
+  .shortcuts .wide { grid-column: auto; }
+
+  .mac {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas: "awake clip" "sleep clip" "actions actions";
+    align-content: start;
+    gap: 8px 10px;
+  }
+  .mac[hidden] { display: none; }
+  .mac-group { padding: 10px 12px; }
+  .mac-group:nth-child(1) { grid-area: awake; }
+  .mac-group:nth-child(2) { grid-area: sleep; }
+  .mac-group:nth-child(3) { grid-area: clip; }
+  .mac-actions { grid-area: actions; }
+  .mac-head { margin-bottom: 8px; }
+  .mac-note { display: none; }
+  .mac-actions button { height: 44px; }
+
+  /* With the iOS keyboard up there's little height left: just the pad and keys. */
+  body.kb-open { grid-template-rows: 0 0 minmax(0, 1fr) auto; }
+  body.kb-open .topbar, body.kb-open .notice { overflow: hidden; }
+}
+.setting-label-block { display: block; }

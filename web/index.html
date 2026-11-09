@@ -20,6 +20,12 @@
     </div>
     <div class="topbar-end">
       <span id="rtt" class="rtt"></span>
+      <button id="power-chip" class="chip" hidden></button>
+      <button id="btn-find" class="icon-button" aria-label="Find my cursor">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+        </svg>
+      </button>
       <button id="btn-settings" class="icon-button" aria-label="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>
@@ -40,6 +46,7 @@
         <div><dt>Click</dt><dd>tap</dd></div>
         <div><dt>Right click</dt><dd>two-finger tap</dd></div>
         <div><dt>Scroll</dt><dd>two fingers</dd></div>
+        <div><dt>Zoom</dt><dd>pinch</dd></div>
         <div><dt>Drag</dt><dd>tap, then touch and move</dd></div>
         <div><dt>Switch desktop</dt><dd>three fingers left or right</dd></div>
         <div><dt>Mission Control</dt><dd>three fingers up</dd></div>
@@ -107,6 +114,47 @@
     </div>
   </section>
 
+  <section id="mac" class="mac" hidden>
+    <div class="mac-group">
+      <div class="mac-head"><span>Keep Mac awake</span><span id="awake-state" class="mac-state"></span></div>
+      <div class="choices">
+        <button data-cmd="w off">Off</button>
+        <button data-cmd="w 60">1 hour</button>
+        <button data-cmd="w 120">2 hours</button>
+        <button data-cmd="w on">Always</button>
+      </div>
+    </div>
+
+    <div class="mac-group">
+      <div class="mac-head"><span>Sleep timer</span><span id="sleep-state" class="mac-state"></span></div>
+      <div class="choices">
+        <button data-cmd="z off">Off</button>
+        <button data-cmd="z 15">15 min</button>
+        <button data-cmd="z 30">30 min</button>
+        <button data-cmd="z 60">1 hour</button>
+        <button data-cmd="z 90">90 min</button>
+      </div>
+      <p class="mac-note">Keeps the Mac on until then, pauses what's playing, then puts the Mac to sleep.</p>
+    </div>
+
+    <div class="mac-group">
+      <div class="mac-head"><span>Clipboard</span><span id="clip-state" class="mac-state"></span></div>
+      <textarea id="clip-text" rows="2" placeholder="Paste a link or text here" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+      <div class="clip-actions">
+        <button id="clip-send">Send to Mac</button>
+        <button id="clip-paste">Send &amp; paste</button>
+        <button id="clip-get">Get from Mac</button>
+        <button id="clip-copy">Copy to iPhone</button>
+      </div>
+    </div>
+
+    <div class="mac-actions">
+      <button data-cmd="f">Find cursor</button>
+      <button data-cmd="k q ctrl,cmd">Lock Mac</button>
+      <button data-cmd="y displaysleep">Display off</button>
+    </div>
+  </section>
+
   <div id="toolbar" class="keys" role="toolbar" aria-label="Keys">
     <button data-key="escape">esc</button>
     <button data-key="tab">tab</button>
@@ -124,13 +172,14 @@
     <div class="modes" role="tablist" aria-label="Mode">
       <button role="tab" data-mode="trackpad" aria-selected="true">Trackpad</button>
       <button role="tab" data-mode="remote" aria-selected="false">Remote</button>
+      <button role="tab" data-mode="mac" aria-selected="false">Mac</button>
     </div>
-    <button id="btn-keyboard" class="pill">
+    <button id="btn-keyboard" class="pill" aria-label="Keyboard">
       <svg width="22" height="15" viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
         <rect x="1" y="1" width="24" height="16" rx="3.5"/>
         <path d="M5.5 5.5h1M9.5 5.5h1M13.5 5.5h1M17.5 5.5h1M5.5 9h1M9.5 9h1M13.5 9h1M17.5 9h1M8 13h10M20.5 5.5h0M20.5 9h0" stroke-linecap="round"/>
       </svg>
-      <span id="keyboard-label">Keyboard</span>
+      <span id="keyboard-label">Done</span>
     </button>
   </nav>
 
@@ -155,6 +204,14 @@
         <span class="setting-label">Natural scrolling<small>Content moves with your fingers, like a Mac trackpad</small></span>
         <input id="set-natural" type="checkbox" switch>
       </label>
+      <div class="setting">
+        <span class="setting-label setting-label-block">Layout<small>One-handed puts everything within reach of your thumb</small></span>
+        <div id="set-hand" class="choices setting-choices">
+          <button data-hand="both">Both hands</button>
+          <button data-hand="left">Left hand</button>
+          <button data-hand="right">Right hand</button>
+        </div>
+      </div>
       <div class="sheet-actions">
         <button id="settings-hints">Show gesture tips</button>
         <button id="settings-reset">Reset to defaults</button>

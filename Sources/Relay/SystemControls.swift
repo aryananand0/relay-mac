@@ -2,7 +2,7 @@ import AppKit
 import CoreAudio
 import Foundation
 
-/// Media keys, output volume status, and display sleep.
+/// Media keys, output volume status, display and Mac sleep, and the clipboard.
 enum SystemControls {
     /// Hardware media key codes (NX_KEYTYPE_* in IOKit/hidsystem/ev_keymap.h).
     private static let mediaKeys: [String: Int32] = [
@@ -37,6 +37,39 @@ enum SystemControls {
         pmset.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
         pmset.arguments = ["displaysleepnow"]
         try? pmset.run()
+    }
+
+    /// Puts the whole Mac to sleep (Apple menu › Sleep). Needs no admin rights.
+    static func sleepMac() {
+        let pmset = Process()
+        pmset.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        pmset.arguments = ["sleepnow"]
+        try? pmset.run()
+    }
+
+    /// True while any app is sending sound to the current output device.
+    static func isAudioPlaying() -> Bool {
+        guard let device = defaultOutputDevice() else { return false }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var running: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &running) == noErr else { return false }
+        return running != 0
+    }
+
+    /// Clipboard text is at most this long either way (it travels in one WebSocket message).
+    static let clipboardLimit = 100_000
+
+    static func setClipboard(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
+    }
+
+    static func clipboardText() -> String {
+        String((NSPasteboard.general.string(forType: .string) ?? "").prefix(clipboardLimit))
     }
 
     struct VolumeStatus {
