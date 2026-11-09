@@ -12,6 +12,8 @@ final class MenuBar: NSObject {
     private let pairingURL: URL
     private let onPause: (Bool) -> Void
     private var connected = 0
+    /// The iPhone certificate profile, for "Send Certificate to iPhone…" (AirDrop).
+    var certificateProfile: URL?
     /// Replaces the pairing code (after the user confirms).
     var onNewPairingCode: (() -> Void)?
     /// Turns off keep-awake and the sleep timer.
@@ -31,6 +33,7 @@ final class MenuBar: NSObject {
         menu.addItem(powerItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Show Pairing Code…", action: #selector(showPairing), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Send Certificate to iPhone…", action: #selector(sendCertificate), keyEquivalent: "").target = self
         menu.addItem(withTitle: "New Pairing Code…", action: #selector(newPairingCode), keyEquivalent: "").target = self
         pauseItem.target = self
         menu.addItem(pauseItem)
@@ -73,6 +76,17 @@ final class MenuBar: NSObject {
     }
 
     @objc private func showPairing() { NSWorkspace.shared.open(pairingURL) }
+
+    /// AirDrop is an authenticated, direct transfer, so the profile can't be swapped on the way.
+    @objc private func sendCertificate() {
+        guard let file = certificateProfile, let airDrop = NSSharingService(named: .sendViaAirDrop) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        if airDrop.canPerform(withItems: [file]) {
+            airDrop.perform(withItems: [file])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([file])   // AirDrop off: show the file instead
+        }
+    }
 
     @objc private func newPairingCode() {
         let alert = NSAlert()

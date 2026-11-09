@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <sub>macOS 14 or later on Apple silicon&nbsp;&nbsp;·&nbsp;&nbsp;iPhone with Safari&nbsp;&nbsp;·&nbsp;&nbsp;No dependencies&nbsp;&nbsp;·&nbsp;&nbsp;End-to-end encrypted</sub>
+  <sub>macOS 14 or later on Apple silicon&nbsp;&nbsp;·&nbsp;&nbsp;iPhone with Safari&nbsp;&nbsp;·&nbsp;&nbsp;No dependencies&nbsp;&nbsp;·&nbsp;&nbsp;HTTPS and end-to-end encrypted</sub>
 </p>
 
 <p align="center">
@@ -102,9 +102,19 @@ This builds Relay, installs it to `~/Applications/Relay.app`, and starts it now 
 ./scripts/pair.sh
 ```
 
-This opens a QR code on the Mac (or choose **Show Pairing Code…** from the menu bar icon). Scan it with the iPhone camera, then in Safari tap **Share › Add to Home Screen**. The icon pairs itself.
+This opens the pairing page on the Mac (or choose **Show Pairing Code…** from the menu bar icon). It has two steps:
+
+1. **Trust this Mac (once).** Relay talks to your iPhone over HTTPS, using a certificate it creates for your Mac. Get it onto the iPhone:
+   - **Recommended:** choose **Send Certificate to iPhone…** from the menu bar icon and pick your iPhone in AirDrop.
+   - **Or** scan the first QR code and tap **Get the certificate**.
+
+   Then on the iPhone, open **Settings › Profile Downloaded › Install**, and turn it on under **Settings › General › About › Certificate Trust Settings**.
+2. **Open Relay.** Scan the second QR code, then in Safari tap **Share › Add to Home Screen**. The icon pairs itself.
 
 From then on, tap **Relay** on your Home Screen. That's it.
+
+> [!TIP]
+> Had Relay on your Home Screen before it used HTTPS? Opening the old icon now shows the setup steps. Once the certificate is trusted, add Relay to the Home Screen again from the second QR code and delete the old icon.
 
 > [!NOTE]
 > The screen preview needs one more permission the first time you open it: **Screen & System Audio Recording**. Turn on Relay there, then choose **Restart Relay** from the menu bar icon.
@@ -131,11 +141,11 @@ From then on, tap **Relay** on your Home Screen. That's it.
 - **Mac tab:**
   - **Keep Mac awake** for 1 or 2 hours, or until you turn it off.
   - **Sleep timer** of 15 to 90 minutes. It keeps the Mac on until then, pauses what's playing, and puts the Mac to sleep.
-  - **Clipboard:** paste into the box, then **Send to Mac** or **Send & paste**. **Get from Mac** fetches the Mac's text and **Copy to iPhone** copies it.
+  - **Clipboard:** **Send to Mac** or **Send & paste** sends what's in the box, or your iPhone's clipboard if the box is empty. **Get from Mac** fetches the Mac's text and **Copy to iPhone** copies it.
   - **Find cursor**, **Lock Mac** and **Display off**.
 - **Screen preview:** the screen button in the top bar. **Auto** follows the cursor, **1**/**2** pin a screen (or swipe sideways), **All** stacks them. Tap the preview to move the cursor there.
 - **Settings** (sliders icon): cursor speed, scroll speed, natural scrolling, and a one-handed layout for either hand.
-- **Menu bar icon:** connection status, **Show Pairing Code…**, **New Pairing Code…**, **Pause Relay** (turns phones away, for example on guest Wi-Fi), **Open Log**, **Restart Relay** and **Quit Relay**.
+- **Menu bar icon:** connection status, **Show Pairing Code…**, **Send Certificate to iPhone…**, **New Pairing Code…**, **Pause Relay** (turns phones away, for example on guest Wi-Fi), **Open Log**, **Restart Relay** and **Quit Relay**.
 
 </details>
 
@@ -182,7 +192,11 @@ Relay can control your Mac, so it is careful about who it talks to and what leav
 
 - **Local only:** Relay accepts connections only from devices on your local network (private, link-local or same-subnet addresses). It never contacts the internet and has no accounts, analytics or telemetry. It doesn't advertise itself on the network either.
 - **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute, and more than 20 wrong attempts a minute from anywhere pause pairing.
-- **End-to-end encryption:** every connection does a fresh X25519 key exchange, authenticated by the pairing code (stretched with PBKDF2, 600 000 rounds). After that, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305: what you type, the clipboard and the screen preview. The code never crosses the network, and a recording of the traffic can't be used to guess it or to decrypt past sessions later. Altered or replayed messages are rejected.
+- **HTTPS:** the phone page and the control connection use TLS 1.2 or later, with a certificate from a small certificate authority Relay creates on your Mac:
+  - Its private keys live in your login Keychain and can't be exported.
+  - The authority is limited by a Name Constraints extension to `.local` names, `localhost` and private network addresses. Even if its key were stolen, it couldn't be used to impersonate real websites on your iPhone.
+  - Plain HTTP (port 8765) only serves the setup page and the certificate itself, never the app or anything secret.
+- **End-to-end encryption, inside HTTPS:** every connection does a fresh X25519 key exchange, authenticated by the pairing code (stretched with PBKDF2, 600 000 rounds). After that, everything between phone and Mac is encrypted and authenticated with ChaCha20-Poly1305: what you type, the clipboard and the screen preview. The code never crosses the network, and a recording of the traffic can't be used to guess it or to decrypt past sessions later. Altered or replayed messages are rejected.
 - **Browser protections:**
   - Only Relay's own page may open the control connection, so other websites can't reach it.
   - The page runs under a strict Content Security Policy.
@@ -190,15 +204,16 @@ Relay can control your Mac, so it is careful about who it talks to and what leav
 - **Permissions:**
   - **Accessibility** to move the cursor and type.
   - **Screen & System Audio Recording**, only if you use the screen preview. macOS shows its purple indicator whenever the preview is capturing.
-  - **Clipboard:** the Mac's clipboard is read only when you tap **Get from Mac**.
+  - **Clipboard:** the Mac's clipboard is read only when you tap **Get from Mac**. The iPhone's clipboard is read only when you tap **Send** with an empty box, and iOS asks you first.
 - **Your data stays on your Mac and phone:**
   - The pairing code is stored in `~/Library/Application Support/Relay/` and the log in `~/Library/Logs/Relay/`, both readable only by you. The code is never written to the log.
   - The phone keeps the code and your settings in Safari's storage for the Home Screen app.
 
 Things to know:
 - **Guard the code:** anyone with your pairing code (or a photo of the QR code) can control your Mac. If it may have leaked, choose **New Pairing Code…** from the menu bar.
-- **Trusted networks:** encryption protects against anyone listening on the Wi-Fi. But the phone page itself is delivered over plain http, so someone who can actively intercept and alter network traffic could serve a modified page. Use Relay on networks you trust, and **Pause Relay** elsewhere.
+- **Setting up:** the one moment that relies on your network is getting the certificate onto the iPhone. AirDrop can't be tampered with. If you download it instead, do it at home, and check that the fingerprint in iPhone Settings matches the one on your Mac's pairing page.
 - **Older codes:** Relay replaces 8-character codes from older versions automatically; those phones scan the QR code once more.
+- **Removing Relay from the iPhone:** delete the Home Screen icon and remove the profile under **Settings › General › VPN & Device Management**.
 
 Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md).
 

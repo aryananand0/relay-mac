@@ -4,13 +4,13 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// The page shown on the Mac (http://localhost:8765/pair) with a QR code the
-/// iPhone camera can scan. Only served to this Mac itself, never to the network.
+/// The page shown on the Mac (http://localhost:8765/pair) with two QR codes: one to set the
+/// iPhone up for HTTPS (once), one that opens Relay securely and pairs it. Only served to this
+/// Mac itself, never to the network.
 enum PairingPage {
-    static func html(url: String, code: String) -> Data {
-        let qr = qrPNG(url).map { "data:image/png;base64,\($0.base64EncodedString())" } ?? ""
+    static func html(setupURL: String, appURL: String, code: String, fingerprint: String) -> Data {
+        let setupQR = qrDataURI(setupURL), appQR = qrDataURI(appURL)
         let spacedCode = escape(Pairing.spaced(code))
-        let url = escape(url)
         return Data("""
         <!doctype html>
         <html lang="en"><head><meta charset="utf-8"><title>Pair your iPhone with Relay</title>
@@ -18,32 +18,56 @@ enum PairingPage {
         <style>
           :root { color-scheme: dark; }
           body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #000;
-                 color: #e9e2d6; font: 16px/1.5 ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
-          main { width: min(420px, 100% - 32px); text-align: center; }
-          .logo { display: block; width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 15px; }
-          h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
-          p { margin: 0; color: #a39a8c; }
-          .qr { margin: 28px auto 22px; width: 260px; height: 260px; padding: 16px; border-radius: 28px;
-                background: #e9e2d6; }
+                 color: #e9e2d6; font: 15px/1.5 ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+          main { width: min(820px, 100% - 32px); padding: 32px 0; }
+          header { text-align: center; margin-bottom: 28px; }
+          .logo { display: block; width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 13px; }
+          h1 { margin: 0 0 4px; font-size: 28px; font-weight: 600; }
+          header p { margin: 0; color: #a39a8c; }
+          .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+          .step { padding: 22px; border-radius: 22px; background: #15130f; box-shadow: inset 0 0 0 1px rgba(233,226,214,.08); }
+          .step h2 { margin: 0 0 4px; font-size: 18px; }
+          .step .n { color: #d9a55b; margin-right: 6px; }
+          .step p, .step li { color: #c9c0b2; }
+          .step p { margin: 0 0 12px; }
+          .qr { width: 190px; height: 190px; margin: 14px auto; padding: 12px; border-radius: 20px; background: #e9e2d6; }
           .qr img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
-          ol { margin: 0 auto 26px; padding: 0; max-width: 340px; text-align: left; color: #c9c0b2;
-               list-style-position: inside; }
-          li { margin: 4px 0; }
-          .code { font-size: 26px; font-weight: 600; letter-spacing: 0.12em; color: #d9a55b; }
-          .url { margin-top: 10px; font-size: 13px; color: #6f675c; word-break: break-all; }
+          ol { margin: 0; padding-left: 20px; } li { margin: 3px 0; }
+          .code { font-size: 22px; font-weight: 600; letter-spacing: .12em; color: #d9a55b; text-align: center; }
+          .small { font-size: 12.5px; color: #8c8477; word-break: break-all; }
+          .fp { font: 12px ui-monospace, Menlo, monospace; color: #a39a8c; word-break: break-all; margin-top: 6px; }
+          @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
         </style></head><body><main>
-          <img class="logo" src="logo.svg" alt="">
-          <h1>Pair your iPhone</h1>
-          <p>Your iPhone needs to be on the same Wi-Fi as this Mac.</p>
-          <div class="qr"><img alt="QR code that opens Relay on your iPhone" src="\(qr)"></div>
-          <ol>
-            <li>Point your iPhone camera at the code and tap the link.</li>
-            <li>In Safari, tap Share, then Add to Home Screen.</li>
-            <li>Open Relay from your Home Screen.</li>
-          </ol>
-          <p>If Relay asks for a pairing code, enter</p>
-          <div class="code">\(spacedCode)</div>
-          <div class="url">\(url)</div>
+          <header>
+            <img class="logo" src="logo.svg" alt="">
+            <h1>Pair your iPhone</h1>
+            <p>Your iPhone needs to be on the same Wi‑Fi as this Mac.</p>
+          </header>
+          <div class="steps">
+            <section class="step">
+              <h2><span class="n">1</span>Trust this Mac (once)</h2>
+              <p>Relay uses HTTPS. Your iPhone needs this Mac's certificate first.</p>
+              <ol>
+                <li><strong>Easiest:</strong> choose <em>Send Certificate to iPhone…</em> from the Relay icon in the menu bar and pick your iPhone in AirDrop.<br>
+                    <span class="small">Or scan this code and tap “Get the certificate”:</span></li>
+              </ol>
+              <div class="qr"><img alt="QR code that opens Relay's setup page on your iPhone" src="\(setupQR)"></div>
+              <ol start="2">
+                <li>On the iPhone: Settings › Profile Downloaded › Install.</li>
+                <li>Settings › General › About › Certificate Trust Settings › turn on <em>Relay Local CA</em>.</li>
+              </ol>
+              <p class="small" style="margin-top:12px">To make sure it's the right certificate, its SHA‑256 fingerprint (Settings › General › VPN &amp; Device Management › Relay Local CA › More Details) should be:</p>
+              <div class="fp">\(escape(fingerprint))</div>
+            </section>
+            <section class="step">
+              <h2><span class="n">2</span>Open Relay</h2>
+              <p>Scan this code, then in Safari tap Share › Add to Home Screen. The icon pairs itself.</p>
+              <div class="qr"><img alt="QR code that opens Relay securely on your iPhone and pairs it" src="\(appQR)"></div>
+              <p style="text-align:center">If Relay asks for a pairing code, enter</p>
+              <div class="code">\(spacedCode)</div>
+              <p class="small" style="text-align:center; margin-top:10px">\(escape(appURL.components(separatedBy: "#").first ?? appURL))</p>
+            </section>
+          </div>
         </main></body></html>
         """.utf8)
     }
@@ -51,6 +75,10 @@ enum PairingPage {
     private static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    private static func qrDataURI(_ text: String) -> String {
+        qrPNG(text).map { "data:image/png;base64,\($0.base64EncodedString())" } ?? ""
     }
 
     private static func qrPNG(_ text: String) -> Data? {

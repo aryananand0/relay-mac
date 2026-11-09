@@ -9,9 +9,9 @@ var failures = 0
 func check(_ ok: Bool, _ what: String) { print("\(ok ? "PASS" : "FAIL"): \(what)"); if !ok { failures += 1 } }
 
 func raw(origin: String? = nil) -> URLSessionWebSocketTask {
-    var request = URLRequest(url: URL(string: "ws://127.0.0.1:8766/")!)
+    var request = URLRequest(url: URL(string: "wss://127.0.0.1:8766/")!)
     if let origin { request.setValue(origin, forHTTPHeaderField: "Origin") }
-    let t = URLSession.shared.webSocketTask(with: request)
+    let t = RelayTrust.session.webSocketTask(with: request)
     t.resume()
     return t
 }
@@ -124,14 +124,23 @@ do {
     check(await text(t) == nil, "a WebSocket from another website's origin is refused")
 }
 
-// 7. The web server.
-let index = curl(["http://127.0.0.1:8765/"])
-check(index.hasPrefix("HTTP/1.1 200") && index.contains("Content-Security-Policy: default-src 'none'"),
-      "the phone page is served with a strict Content-Security-Policy")
+// 7. The web servers: HTTPS for the app, plain HTTP only for setup.
+let ca = RelayTrust.caURL.deletingLastPathComponent().appendingPathComponent("relay-ca.pem").path
+let index = curl(["--cacert", ca, "https://localhost:8443/"])
+check(index.hasPrefix("HTTP/1.1 200") && index.contains("Content-Security-Policy: default-src 'none'")
+      && index.contains("connect-src wss://"), "the phone page is served over HTTPS with a strict Content-Security-Policy")
 check(index.contains("X-Frame-Options: DENY") && index.contains("X-Content-Type-Options: nosniff"), "anti-framing and nosniff headers")
+check(!curl(["https://localhost:8443/"]).hasPrefix("HTTP"), "HTTPS is refused by a client that doesn't trust Relay's CA")
 for path in ["/../Package.swift", "/%2e%2e/Package.swift", "/web/../../Package.swift", "//etc/passwd"] {
-    check(curl(["--path-as-is", "http://127.0.0.1:8765\(path)"]).hasPrefix("HTTP/1.1 404"), "path traversal blocked: \(path)")
+    check(curl(["--cacert", ca, "--path-as-is", "https://localhost:8443\(path)"]).hasPrefix("HTTP/1.1 404"), "path traversal blocked: \(path)")
 }
+let setup = curl(["http://127.0.0.1:8765/"])
+check(setup.hasPrefix("HTTP/1.1 200") && setup.contains("Set up Relay"), "plain HTTP shows only the setup page")
+check(["/relay.js", "/crypto.js", "/relay.css"].allSatisfy { curl(["http://127.0.0.1:8765\($0)"]).hasPrefix("HTTP/1.1 404") },
+      "plain HTTP never serves the app itself")
+let profile = curl(["http://127.0.0.1:8765/Relay.mobileconfig"])
+check(profile.contains("application/x-apple-aspen-config") && profile.contains("com.apple.security.root"),
+      "the certificate profile is offered for setup")
 check(curl(["-H", "Host: evil.example:8765", "http://127.0.0.1:8765/pair"]).hasPrefix("HTTP/1.1 404"),
       "pairing page refused for a foreign Host header (DNS rebinding)")
 let pair = curl(["http://localhost:8765/pair"])

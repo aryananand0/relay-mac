@@ -17,8 +17,8 @@ final class RelayClient: @unchecked Sendable {
     private var sendCounter: UInt64 = 0
     private var receiveCounter: UInt64 = 0
 
-    init(url: String = "ws://127.0.0.1:8766/") {
-        task = URLSession.shared.webSocketTask(with: URL(string: url)!)
+    init(url: String = "wss://127.0.0.1:8766/") {
+        task = RelayTrust.session.webSocketTask(with: URL(string: url)!)
         task.resume()
     }
 
@@ -119,5 +119,31 @@ final class RelayClient: @unchecked Sendable {
             i = j
         }
         return out
+    }
+}
+
+/// Trusts Relay's own certificate authority (and nothing else) for the wss:// connection,
+/// the way an iPhone does once the Relay profile is installed.
+final class RelayTrust: NSObject, URLSessionDelegate, @unchecked Sendable {
+    static let caURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Relay/tls/relay-ca.cer")
+    static let session = URLSession(configuration: .ephemeral, delegate: RelayTrust(), delegateQueue: nil)
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust,
+              let der = try? Data(contentsOf: RelayTrust.caURL),
+              let ca = SecCertificateCreateWithData(nil, der as CFData) else {
+            return completionHandler(.performDefaultHandling, nil)
+        }
+        SecTrustSetAnchorCertificates(trust, [ca] as CFArray)
+        SecTrustSetAnchorCertificatesOnly(trust, true)
+        var error: CFError?
+        if SecTrustEvaluateWithError(trust, &error) {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
     }
 }

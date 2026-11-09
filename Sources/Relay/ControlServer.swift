@@ -78,19 +78,19 @@ final class ControlServer {
         }
     }
 
-    init(port: UInt16, queue: DispatchQueue, pairing: Pairing, input: InputInjector,
-         keyboard: KeyboardInjector, power: Power) throws {
-        let params = NWParameters.tcp
+    /// port: the secure WebSocket port; appPort: the HTTPS port the phone page is served from.
+    init(port: UInt16, appPort: UInt16, tls: NWProtocolTLS.Options, queue: DispatchQueue, pairing: Pairing,
+         input: InputInjector, keyboard: KeyboardInjector, power: Power) throws {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        let params = NWParameters(tls: tls, tcp: tcp)   // wss://
         params.allowLocalEndpointReuse = true
-        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-            tcp.noDelay = true
-        }
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         ws.maximumMessageSize = SystemControls.clipboardLimit * 4 + 16   // clipboard text, UTF-8
         // Browsers always send Origin. Only Relay's own page (served from this Mac on the
-        // web port) may open the control socket, so other web pages can't even try codes.
-        let webPort = port - 1
+        // HTTPS port) may open the control socket, so other web pages can't even try codes.
+        let webPort = appPort
         ws.setClientRequestHandler(queue) { _, headers in
             let origin = headers.first { $0.name.lowercased() == "origin" }?.value
             guard let origin else { return .init(status: .accept, subprotocol: nil) }  // non-browser client
@@ -158,7 +158,7 @@ final class ControlServer {
     static func allowedOrigins(webPort: UInt16) -> Set<String> {
         var hosts = ["localhost", "127.0.0.1", "[::1]"] + PeerPolicy.localIPv4Addresses()
         if let name = SCDynamicStoreCopyLocalHostName(nil) as String? { hosts.append("\(name).local") }
-        return Set(hosts.map { "http://\($0):\(webPort)".lowercased() })
+        return Set(hosts.map { "https://\($0):\(webPort)".lowercased() })
     }
 
     func start() {

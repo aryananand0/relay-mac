@@ -31,10 +31,12 @@ The [Security section of the README](README.md#privacy-and-security) describes t
 - **Only local devices:** the Mac accepts connections only from private, link-local or same-subnet addresses. Relay never contacts the internet and has no accounts, cloud service or telemetry.
 - **Pairing code:** a phone must prove it knows the pairing code before anything is accepted. Five wrong attempts lock that address out for a minute.
 - **Encryption:** each connection does a fresh X25519 exchange, authenticated by the pairing code stretched with PBKDF2 (600 000 rounds). Then everything is encrypted with ChaCha20-Poly1305. The code never crosses the network; recorded traffic can't be used to guess it offline or to decrypt past sessions.
+- **HTTPS:** the phone page and control connection use TLS with a certificate from a certificate authority Relay creates on the Mac. Its keys are non-exportable Keychain keys, and Name Constraints limit it to `.local` names, `localhost` and private addresses, so it can't vouch for real websites.
 - **Browser isolation:** only Relay's own page may open the control connection, and the pairing page is served only to the Mac itself.
 
 Known limits, which are not vulnerabilities in themselves but are worth understanding:
 
 - **Pairing code strength:** anyone who has the pairing code (or a photo of the QR code) can control the Mac. Use **New Pairing Code…** in the menu bar if it may have leaked.
 - **Active attackers:** someone who can intercept and alter traffic could try guesses against one captured pairing attempt; each guess costs 600 000 PBKDF2 rounds against a 12-character (about 59-bit) code. Pairing attempts are also rate-limited per address and globally.
-- **No server identity check:** the phone page itself is delivered over plain http from the Mac, so an attacker who controls the network could serve a modified page to a phone. Use Relay on networks you trust, and pause it elsewhere.
+- **First-time setup:** the certificate has to get to the iPhone once. AirDrop (menu bar › Send Certificate to iPhone…) is authenticated. Downloading it over the network is trust-on-first-use, so the pairing page shows its SHA-256 fingerprint to compare in iPhone Settings.
+- **Local trust store:** the certificate authority is trusted by the iPhone for local names. Remove its profile (Settings › General › VPN & Device Management) if you stop using Relay.

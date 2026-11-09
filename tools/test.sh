@@ -17,7 +17,7 @@ for t in securitytest movetest smoothtest scrolltest typetest volumetest powerte
   fi
 done
 echo "== crypto (web/crypto.js vs Node)"; node cryptotest.mjs
-echo "== phone crypto ↔ Mac"; node interoptest.mjs "$CODE" | tail -1
+echo "== phone crypto ↔ Mac"; NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/Relay/tls/relay-ca.pem" node interoptest.mjs "$CODE" | tail -1
 echo "== security";         "$OUT/securitytest" "$CODE" | tail -1
 echo "== cursor movement";  "$OUT/movetest" "$CODE" | tail -1
 echo "== smoothness";       "$OUT/smoothtest" "$CODE" 0 0; "$OUT/smoothtest" "$CODE" 1 4

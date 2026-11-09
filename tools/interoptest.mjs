@@ -1,11 +1,11 @@
 // Pairs with the running Relay using the phone's own web/crypto.js (in Node instead of
 // Safari) and exchanges encrypted messages, proving the phone and Mac implementations agree.
-// Usage: node tools/interoptest.mjs <pairing code>
+// Usage: NODE_EXTRA_CA_CERTS=~/Library/Application\ Support/Relay/tls/relay-ca.pem node tools/interoptest.mjs <code>
 import { createRequire } from "node:module";
 const RC = createRequire(import.meta.url)("../web/crypto.js");
 const code = process.argv[2];
 const enc = new TextEncoder(), dec = new TextDecoder();
-const ws = new WebSocket("ws://127.0.0.1:8766/");
+const ws = new WebSocket("wss://localhost:8766/");   // trusts Relay's CA via NODE_EXTRA_CA_CERTS
 ws.binaryType = "arraybuffer";
 let channel = null;
 const fail = (why) => { console.log("FAIL:", why); process.exit(1); };

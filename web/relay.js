@@ -121,7 +121,7 @@ function connect(immediate) {
   if (immediate) retryDelay = 300;
 
   setStatus("connecting", "Connecting");
-  const socket = new WebSocket(`ws://${location.hostname}:${CONTROL_PORT}/`);
+  const socket = new WebSocket(`wss://${location.hostname}:${CONTROL_PORT}/`);
   ws = socket;
   authed = false;
   channel = null;
@@ -970,8 +970,9 @@ powerChip.addEventListener("click", () => setMode("mac"));
 renderPower();
 
 // ---- Clipboard -------------------------------------------------------------
-// Safari only allows clipboard access on https pages, so text goes through a box:
-// paste into it (touch and hold › Paste) to send, or get the Mac's text into it.
+// The page is served over HTTPS, so Safari lets it use the iPhone clipboard directly: Send
+// with an empty box pastes from the iPhone (iOS asks first), and Copy writes straight to it.
+// The box stays for editing, and as the fallback if a browser refuses.
 const clipText = $("clip-text"), clipState = $("clip-state");
 let clipStateTimer = null;
 
@@ -981,7 +982,10 @@ function setClipState(text) {
   if (text) clipStateTimer = setTimeout(() => { clipState.textContent = ""; }, 3000);
 }
 
-function sendClipboard(paste) {
+async function sendClipboard(paste) {
+  if (!clipText.value && navigator.clipboard && navigator.clipboard.readText) {
+    try { clipText.value = await navigator.clipboard.readText(); } catch {}
+  }
   const text = clipText.value;
   if (!text) { setClipState("Paste something first"); return; }
   if (!send("b " + text)) { setClipState("Not connected"); return; }
@@ -1000,6 +1004,16 @@ $("clip-paste").addEventListener("click", () => sendClipboard(true));
 $("clip-get").addEventListener("click", () => { if (!send("q clip")) setClipState("Not connected"); });
 $("clip-copy").addEventListener("click", () => {
   if (!clipText.value) { setClipState("Nothing to copy"); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(clipText.value).then(
+      () => setClipState("Copied to your iPhone"),
+      () => copyBySelection());
+    return;
+  }
+  copyBySelection();
+});
+
+function copyBySelection() {
   clipText.focus();
   clipText.select();
   clipText.setSelectionRange(0, clipText.value.length);
@@ -1007,7 +1021,7 @@ $("clip-copy").addEventListener("click", () => {
   try { copied = document.execCommand("copy"); } catch {}
   clipText.blur();
   setClipState(copied ? "Copied to your iPhone" : "Select the text and tap Copy");
-});
+}
 
 // ---- Screen preview ----------------------------------------------------------
 // Off until you tap the screen button, and only while the Trackpad is showing and
