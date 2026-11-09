@@ -452,7 +452,6 @@ pad.addEventListener("touchmove", (e) => {
   follow(touch, e.timeStamp);
   gesture.travel += dist;
   if (gesture.travel > TAP_MAX_TRAVEL) lastClick.button = -1;
-  if (airOn) return;   // with the air mouse on, pointing the phone moves the cursor, not the finger
 
   if (gesture.dragCandidate && !gesture.dragging && gesture.travel > DRAG_START_TRAVEL) {
     flushMove();
@@ -534,6 +533,7 @@ function endTouch(e) {
     const right = gesture.maxFingers === 2;
     click(right ? 1 : 0);
     ripple(right);
+    airFreezeUntil = performance.now() + AIR_TAP_FREEZE_MS;
     lastTapAt = right ? -Infinity : e.timeStamp;
   }
   gesture = null;
@@ -776,65 +776,101 @@ const handChoices = $("set-hand");
 const airInput = $("set-air"), airValue = $("set-air-value");
 
 // ---- Air mouse --------------------------------------------------------------
-// Point the phone to move the cursor, using the gyroscope. Only while a finger rests on the
-// pad ("hold to point"), so the cursor never drifts when the phone is put down; a quick tap
-// still clicks, and tap-then-hold-and-point drags. Works held flat like a remote or upright:
-// turning left/right is measured around the real vertical (from gravity), tilting up/down
-// around the phone's side-to-side axis. Motion sensors run only while the air mouse is on and
-// Relay is on screen. Safari offers them only on secure (HTTPS) pages, which Relay is.
-const AIR_START_MS = 180;      // a touch shorter than this is a tap, not aiming
-const AIR_DEADZONE = 2;        // deg/s; hand tremor below this is ignored
-const AIR_GAIN_SLOW = 14;      // screen points per degree for slow, precise pointing
-const AIR_GAIN_FAST = 42;      // … and for quick sweeps across the screen
+// Point the phone to move the cursor, like a TV remote. It reads the phone's fused orientation
+// (gyroscope + accelerometer, as iOS computes it), works out where the phone points (the top
+// edge when held flat like a remote, the back when held upright) and moves the cursor by how
+// much that direction turns left/right and up/down. Twisting the phone does nothing.
+// A one-euro filter removes hand tremor when still but keeps quick sweeps responsive, and the
+// cursor speeds up with faster turns, like pointer acceleration. The finger still works too:
+// tap to click, slide to nudge, tap-then-hold to drag. Pointing pauses while a finger is
+// pressing, so tapping doesn't jolt the cursor off target. Sensors run only while the air mouse
+// is on, the trackpad is showing and Relay is on screen; Safari offers them only on HTTPS.
+const AIR_START_MS = 180;      // pointing pauses this long after a finger lands (taps stay put)
+const AIR_TAP_FREEZE_MS = 120; // … and this long after a tap
+const AIR_GAIN_SLOW = 30;      // screen points per degree for slow, precise pointing
+const AIR_GAIN_FAST = 80;      // … and for quick sweeps across the screen
+const AIR_STILL = 0.6;         // deg/s: slower than this is the hand holding still
+const AIR_MIN_CUTOFF = 2;      // Hz, one-euro filter: smoothing when still …
+const AIR_BETA = 0.05;         // … and how fast it loosens as the phone turns faster
 const airButton = $("btn-air"), airHint = $("air-hint");
 // (var, not let: touch handlers above read these while the page starts up.)
 var airOn = false;
-var airTouchAt = 0;            // when the aiming finger went down (0 = none)
-let airLastAt = 0;
+var airTouchAt = 0;            // when the finger went down (0 = none)
+var airFreezeUntil = 0;
 let airListening = false;
+let air = null;                // { axis, raw, hu, h, hv, e, ev, t }: unwrapped heading, filter state
 
-function airAiming(now) {
-  return airOn && gesture && gesture.maxFingers === 1 && airTouchAt && now - airTouchAt > AIR_START_MS;
+const DEG = Math.PI / 180;
+function smoothstep(a, b, x) { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); }
+
+/// Where the phone points, as compass-style heading and elevation in degrees, for the top edge
+/// ("top") or the back ("back"). Uses the W3C orientation angles (Z-X'-Y'').
+function pointing(alpha, beta, gamma, axis) {
+  const cz = Math.cos(alpha * DEG), sz = Math.sin(alpha * DEG);
+  const cx = Math.cos(beta * DEG), sx = Math.sin(beta * DEG);
+  const cy = Math.cos(gamma * DEG), sy = Math.sin(gamma * DEG);
+  let x, y, z;
+  if (axis === "top") { x = -cx * sz; y = cz * cx; z = sx; }
+  else { x = -(cy * sz * sx + cz * sy); y = -(sz * sy - cz * cy * sx); z = -cx * cy; }
+  return { heading: Math.atan2(x, y) / DEG, elevation: Math.asin(Math.max(-1, Math.min(1, z))) / DEG };
 }
 
-function onMotion(e) {
-  const r = e.rotationRate;
-  const now = performance.now();
-  if (!r || !airAiming(now)) { airLastAt = 0; return; }
-  const dt = airLastAt ? Math.min((now - airLastAt) / 1000, 0.05) : (e.interval > 1 ? e.interval / 1000 : e.interval || 1 / 60);
-  airLastAt = now;
+function euro(f, key, value, dt) {
+  const a = (cutoff) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+  const v = (value - f[key]) / dt;
+  f[key + "v"] += a(1) * (v - f[key + "v"]);
+  const moved = a(AIR_MIN_CUTOFF + AIR_BETA * Math.abs(f[key + "v"])) * (value - f[key]);
+  f[key] += moved;
+  return moved;
+}
 
-  // Which way is up, in the phone's own axes. The sign of gravity readings differs between
-  // browsers, so pick the direction that points out of the screen or the top edge, which is
-  // "up" for any sensible way of holding a pointer.
-  let ux = 0, uy = 0, uz = 1;
-  const g = e.accelerationIncludingGravity;
-  if (g && g.x != null) {
-    const n = Math.hypot(g.x, g.y, g.z) || 1;
-    ux = g.x / n; uy = g.y / n; uz = g.z / n;
-    if (uy + uz < 0) { ux = -ux; uy = -uy; uz = -uz; }
+function onOrientation(e) {
+  if (e.alpha == null || e.beta == null || e.gamma == null) return;
+  const now = performance.now();
+  // Point with whichever of the top edge or the back is nearer level; switch only when the
+  // grip clearly changes, and start afresh then so the cursor doesn't jump.
+  let axis = air && air.axis;
+  if (!axis || Math.abs(pointing(e.alpha, e.beta, e.gamma, axis).elevation) > 65) {
+    const top = Math.abs(pointing(e.alpha, e.beta, e.gamma, "top").elevation);
+    const back = Math.abs(pointing(e.alpha, e.beta, e.gamma, "back").elevation);
+    const best = top <= back ? "top" : "back";
+    if (best !== axis && (!axis || Math.min(top, back) < 45)) { axis = best; air = null; }
   }
-  // rotationRate: beta about x (side to side), gamma about y (bottom to top), alpha about z
-  // (out of the screen), in degrees per second, counterclockwise positive.
-  const yaw = (r.beta || 0) * ux + (r.gamma || 0) * uy + (r.alpha || 0) * uz;   // turning left > 0
-  const pitch = r.beta || 0;                                                    // tipping up > 0
-  const rate = Math.hypot(yaw, pitch);
-  if (rate < AIR_DEADZONE) return;
-  const t = Math.min(Math.max((rate - 5) / 115, 0), 1);
-  const gain = settings.airSpeed * (AIR_GAIN_SLOW + (AIR_GAIN_FAST - AIR_GAIN_SLOW) * t * t * (3 - 2 * t));
-  if (gesture.dragCandidate && !gesture.dragging) {   // tap, then hold and point = drag
+  const p = pointing(e.alpha, e.beta, e.gamma, axis);
+  if (!air || now - air.t > 250) {
+    air = { axis, raw: p.heading, hu: p.heading, h: p.heading, hv: 0, e: p.elevation, ev: 0, t: now };
+    return;
+  }
+  const dt = Math.max((now - air.t) / 1000, 0.004);
+  air.t = now;
+  let turn = p.heading - air.raw;                 // unwrap across ±180°
+  if (turn > 180) turn -= 360; else if (turn < -180) turn += 360;
+  air.raw = p.heading;
+  air.hu += turn;
+  const dh = euro(air, "h", air.hu, dt);
+  const de = euro(air, "e", p.elevation, dt);
+
+  // Hold still while a finger is pressing (a tap or a two-finger gesture), and just after a tap.
+  if (gesture && (gesture.maxFingers > 1 || (airTouchAt && now - airTouchAt < AIR_START_MS))) return;
+  if (now < airFreezeUntil) return;
+  const rate = Math.hypot(dh, de) / dt;           // deg/s
+  if (rate < AIR_STILL) return;
+  const gain = settings.airSpeed * smoothstep(AIR_STILL, AIR_STILL * 3, rate) *
+    (AIR_GAIN_SLOW + (AIR_GAIN_FAST - AIR_GAIN_SLOW) * smoothstep(4, 90, rate));
+  if (gesture && gesture.dragCandidate && !gesture.dragging) {   // tap, then hold and point = drag
     flushMove();
     send("d 0 1");
     gesture.dragging = true;
   }
-  queue("m", -yaw * dt * gain, -pitch * dt * gain);
+  queue("m", dh * gain, -de * gain);
 }
 
 function listenToMotion(on) {
   if (on === airListening) return;
   airListening = on;
-  if (on) window.addEventListener("devicemotion", onMotion);
-  else window.removeEventListener("devicemotion", onMotion);
+  air = null;
+  if (on) window.addEventListener("deviceorientation", onOrientation);
+  else window.removeEventListener("deviceorientation", onOrientation);
 }
 
 function showAirState(message) {
@@ -842,20 +878,20 @@ function showAirState(message) {
   airButton.setAttribute("aria-pressed", String(airOn));
   document.body.classList.toggle("air", airOn || !!message);
   airHint.hidden = !airOn && !message;
-  airHint.querySelector("span").textContent = message || "Hold here and point at the screen · tap to click";
+  airHint.querySelector("span").textContent = message || "Point at the screen · tap to click · tap, then hold to drag";
   airHint.classList.toggle("warn", !!message);
   if (message) setTimeout(() => { if (!airOn) { airHint.hidden = true; document.body.classList.remove("air"); } }, 4000);
 }
 
 async function setAir(on) {
   if (on) {
-    if (typeof DeviceMotionEvent === "undefined" || !window.isSecureContext) {
+    if (typeof DeviceOrientationEvent === "undefined" || !window.isSecureContext) {
       showAirState("The air mouse needs Relay's secure page. Open Relay from the HTTPS QR code.");
       return;
     }
-    if (typeof DeviceMotionEvent.requestPermission === "function") {   // iOS asks once
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {   // iOS asks once
       let answer = "denied";
-      try { answer = await DeviceMotionEvent.requestPermission(); } catch {}
+      try { answer = await DeviceOrientationEvent.requestPermission(); } catch {}
       if (answer !== "granted") {
         showAirState("Allow motion access to use the air mouse. If you said no, close and reopen Relay to be asked again.");
         return;

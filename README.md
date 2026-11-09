@@ -40,7 +40,7 @@ It runs entirely between your own two devices. The Mac serves the phone page its
 
 **Trackpad that feels like a Mac.** Pointer acceleration modelled on macOS, 120 Hz motion pacing that smooths over Wi-Fi hiccups, tap to click, two-finger scrolling with momentum, tap-and-drag, pinch to zoom, and three- or four-finger swipes for desktops, Mission Control and App Exposé.
 
-**Air mouse.** Tap the pointer button, hold a finger on the pad and point your phone at the screen: the cursor follows, like a TV remote. Lift your finger and it stays put.
+**Air mouse.** Tap the pointer button and point your phone at the screen: the cursor follows, like a TV remote. Hand tremor is smoothed out, faster turns travel further, and tapping the pad still clicks without knocking the cursor off target.
 
 **A real keyboard.** The iPhone keyboard types straight into the Mac, including accents, emoji, dictation and predictive text. A row of extra keys adds esc, tab, arrows and sticky ⌃ ⌥ ⇧ ⌘ for shortcuts.
 
@@ -139,7 +139,7 @@ From then on, tap **Relay** on your Home Screen. That's it.
 | Three or four fingers left / right | Switch desktop or full-screen app |
 | Three or four fingers up / down | Mission Control / App Exposé |
 | Hold **Click** and move with another finger | Long drags |
-| Air mouse on: hold the pad and point the phone | Move the cursor (tap to click; tap, then hold and point to drag) |
+| Air mouse on: point the phone | Move the cursor (tap to click; tap, then hold and point to drag; slide a finger to nudge) |
 
 - **Keyboard:** tap the keyboard button. Tap a modifier for the next key only, or double-tap it to lock it. Shortcuts use US key positions; typed text works with any layout.
 - **Remote:** play/pause, previous/next, skip back/forward (hold to repeat), volume and mute, plus Video full screen, Mission Control, Switch app, Spotlight, Previous/Next page and Turn display off. If your TV controls its own volume over HDMI, the meter tells you to use the TV's remote.
@@ -149,7 +149,7 @@ From then on, tap **Relay** on your Home Screen. That's it.
   - **Clipboard:** **Send to Mac** or **Send & paste** sends what's in the box, or your iPhone's clipboard if the box is empty. **Get from Mac** fetches the Mac's text and **Copy to iPhone** copies it.
   - **Find cursor**, **Lock Mac** and **Display off**.
 - **Screen preview:** the screen button in the top bar. **Auto** follows the cursor, **1**/**2** pin a screen (or swipe sideways), **All** stacks them. Tap the preview to move the cursor there.
-- **Air mouse** (pointer button in the top bar): iOS asks once for motion access. Works with the phone held flat like a remote or upright. The motion sensors only run while it's on and Relay is on screen.
+- **Air mouse** (pointer button in the top bar): iOS asks once for motion access. Works with the phone held flat like a remote or upright; twisting it does nothing. The motion sensors only run while it's on and Relay is on screen, so turn it off before putting the phone down.
 - **Settings** (sliders icon): cursor speed, scroll speed, air mouse speed, natural scrolling, and a one-handed layout for either hand.
 - **Menu bar icon:** connection status, **Show Pairing Code…**, **Send Certificate to iPhone…**, **New Pairing Code…**, **Pause Relay** (turns phones away, for example on guest Wi-Fi), **Open Log**, **Restart Relay** and **Quit Relay**.
 
