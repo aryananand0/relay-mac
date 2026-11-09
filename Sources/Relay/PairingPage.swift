@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 enum PairingPage {
     static func html(url: String, code: String) -> Data {
         let qr = qrPNG(url).map { "data:image/png;base64,\($0.base64EncodedString())" } ?? ""
-        let spacedCode = code.enumerated().map { $0.offset == 4 ? " \($0.element)" : "\($0.element)" }.joined()
+        let spacedCode = escape(Pairing.spaced(code))
+        let url = escape(url)
         return Data("""
         <!doctype html>
         <html lang="en"><head><meta charset="utf-8"><title>Pair your iPhone with Relay</title>
@@ -45,6 +46,11 @@ enum PairingPage {
           <div class="url">\(url)</div>
         </main></body></html>
         """.utf8)
+    }
+
+    private static func escape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private static func qrPNG(_ text: String) -> Data? {

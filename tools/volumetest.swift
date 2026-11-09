@@ -2,7 +2,7 @@ import Foundation
 // Presses volume keys through Relay and checks the volume status it reports.
 // Leaves volume and mute as it found them.
 let code = CommandLine.arguments[1]
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 func say(_ m: String) async throws { try await t.send(.string(m)) }
 func hear() async throws -> String { if case .string(let s) = try await t.receive() { return s }; return "" }

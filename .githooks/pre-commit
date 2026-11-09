@@ -1,0 +1,4 @@
+#!/bin/zsh
+# Blocks commits that stage secrets, personal paths or private files. Enable once with:
+#   git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/check-repo.sh" --staged

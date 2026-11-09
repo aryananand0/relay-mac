@@ -1,0 +1,7 @@
+#!/bin/zsh
+# Rejects AI co-author / attribution lines in commit messages (see AGENTS.md).
+if grep -qiE '^(co-authored-by|generated-by|assisted-by):.*(claude|anthropic|openai|chatgpt|codex|copilot|gemini|cursor)' "$1" \
+   || grep -qiE 'generated with \[?(claude|chatgpt|codex)' "$1"; then
+  print -u2 "commit-msg: remove the AI co-author/attribution line from the commit message."
+  exit 1
+fi

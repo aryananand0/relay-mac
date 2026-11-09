@@ -1,0 +1,219 @@
+"use strict";
+// Relay's end-to-end encryption, phone side.
+//
+// Safari only offers its built-in crypto (crypto.subtle) on https pages, and Relay's page is
+// served over plain http from the Mac, so the few primitives needed are implemented here:
+// SHA-256, HMAC-SHA256 and HKDF (RFC 2104, RFC 5869), and ChaCha20-Poly1305 (RFC 8439).
+// The Mac side uses Apple's CryptoKit; tools/cryptotest.mjs checks this file against Node's
+// crypto module byte for byte.
+//
+// Protocol (see Sources/Relay/SecureChannel.swift):
+//   Mac → phone   "n <16-byte nonce, hex>"                 (plaintext, on connect)
+//   phone → Mac   "a <16-byte nonce, hex> <proof, hex>"    (plaintext)
+//     keys  = HKDF-SHA256(ikm: pairing code, salt: macNonce ‖ phoneNonce, info: "relay v1", 96 bytes)
+//             → auth key ‖ phone→Mac key ‖ Mac→phone key
+//     proof = HMAC-SHA256(auth key, "relay-auth-v1")
+//   then every message in both directions is a binary frame sealed with ChaCha20-Poly1305
+//   under that direction's key, nonce = 4 zero bytes ‖ 64-bit big-endian message counter.
+//   The pairing code itself never crosses the network.
+const RelayCrypto = (() => {
+  const encoder = new TextEncoder();
+
+  // ---- SHA-256 ----------------------------------------------------------------
+  const K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ]);
+
+  function sha256(data) {
+    const bitLength = data.length * 8;
+    const padded = new Uint8Array(((data.length + 9 + 63) >> 6) << 6);
+    padded.set(data);
+    padded[data.length] = 0x80;
+    const view = new DataView(padded.buffer);
+    view.setUint32(padded.length - 8, Math.floor(bitLength / 0x100000000));
+    view.setUint32(padded.length - 4, bitLength >>> 0);
+    const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                               0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+    const w = new Uint32Array(64);
+    for (let off = 0; off < padded.length; off += 64) {
+      for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
+      for (let i = 16; i < 64; i++) {
+        const a = w[i - 15], b = w[i - 2];
+        const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+        const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      let [a, b, c, d, e, f, g, hh] = h;
+      for (let i = 0; i < 64; i++) {
+        const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        const t1 = (hh + S1 + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+        const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    }
+    const out = new Uint8Array(32);
+    const outView = new DataView(out.buffer);
+    for (let i = 0; i < 8; i++) outView.setUint32(i * 4, h[i]);
+    return out;
+  }
+
+  function concat(...parts) {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let off = 0;
+    for (const p of parts) { out.set(p, off); off += p.length; }
+    return out;
+  }
+
+  function hmac(key, message) {
+    if (key.length > 64) key = sha256(key);
+    const block = new Uint8Array(64);
+    block.set(key);
+    const inner = block.map((b) => b ^ 0x36), outer = block.map((b) => b ^ 0x5c);
+    return sha256(concat(outer, sha256(concat(inner, message))));
+  }
+
+  function hkdf(ikm, salt, info, length) {
+    const prk = hmac(salt, ikm);
+    const out = new Uint8Array(length);
+    let previous = new Uint8Array(0);
+    for (let i = 1, off = 0; off < length; i++) {
+      previous = hmac(prk, concat(previous, info, new Uint8Array([i])));
+      out.set(previous.subarray(0, Math.min(32, length - off)), off);
+      off += 32;
+    }
+    return out;
+  }
+
+  // ---- ChaCha20 ----------------------------------------------------------------
+  function chachaBlock(keyWords, counter, nonceWords, out) {
+    const s = new Uint32Array(16);
+    s[0] = 0x61707865; s[1] = 0x3320646e; s[2] = 0x79622d32; s[3] = 0x6b206574;
+    s.set(keyWords, 4);
+    s[12] = counter;
+    s.set(nonceWords, 13);
+    const x = s.slice();
+    const qr = (a, b, c, d) => {
+      x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 16) | (x[d] >>> 16);
+      x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 12) | (x[b] >>> 20);
+      x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 8) | (x[d] >>> 24);
+      x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 7) | (x[b] >>> 25);
+    };
+    for (let i = 0; i < 10; i++) {
+      qr(0, 4, 8, 12); qr(1, 5, 9, 13); qr(2, 6, 10, 14); qr(3, 7, 11, 15);
+      qr(0, 5, 10, 15); qr(1, 6, 11, 12); qr(2, 7, 8, 13); qr(3, 4, 9, 14);
+    }
+    for (let i = 0; i < 16; i++) out[i] = (x[i] + s[i]) >>> 0;
+  }
+
+  function words(bytes) {
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const w = new Uint32Array(bytes.length / 4);
+    for (let i = 0; i < w.length; i++) w[i] = v.getUint32(i * 4, true);
+    return w;
+  }
+
+  // XORs data with the ChaCha20 keystream starting at block `counter`.
+  function chacha20(key, nonce, counter, data) {
+    const keyWords = words(key), nonceWords = words(nonce);
+    const out = new Uint8Array(data.length);
+    const block = new Uint32Array(16);
+    const blockBytes = new Uint8Array(block.buffer);   // little-endian on every Apple device
+    for (let off = 0; off < data.length; off += 64, counter++) {
+      chachaBlock(keyWords, counter, nonceWords, block);
+      const n = Math.min(64, data.length - off);
+      for (let i = 0; i < n; i++) out[off + i] = data[off + i] ^ blockBytes[i];
+    }
+    return out;
+  }
+
+  // ---- Poly1305 (BigInt keeps it short and exact) -------------------------------------
+  const P = (1n << 130n) - 5n, MASK130 = (1n << 130n) - 1n, MASK128 = (1n << 128n) - 1n;
+  const TOP = 1n << 128n;
+
+  function le128(bytes, off) {
+    const v = new DataView(bytes.buffer, bytes.byteOffset + off, 16);
+    return v.getBigUint64(0, true) | (v.getBigUint64(8, true) << 64n);
+  }
+
+  function poly1305(oneTimeKey, ciphertext) {
+    const r = le128(oneTimeKey, 0) & 0x0ffffffc0ffffffc0ffffffc0fffffffn;
+    const s = le128(oneTimeKey, 16);
+    // AEAD MAC input: ciphertext padded to 16 bytes, then le64(aad length = 0) ‖ le64(ct length).
+    const padded = new Uint8Array(((ciphertext.length + 15) >> 4 << 4) + 16);
+    padded.set(ciphertext);
+    new DataView(padded.buffer).setBigUint64(padded.length - 8, BigInt(ciphertext.length), true);
+    let acc = 0n;
+    for (let off = 0; off < padded.length; off += 16) {
+      acc = (acc + le128(padded, off) + TOP) * r;
+      acc = (acc & MASK130) + (acc >> 130n) * 5n;
+      acc = (acc & MASK130) + (acc >> 130n) * 5n;
+    }
+    if (acc >= P) acc -= P;
+    acc = (acc + s) & MASK128;
+    const tag = new Uint8Array(16);
+    const v = new DataView(tag.buffer);
+    v.setBigUint64(0, acc & 0xffffffffffffffffn, true);
+    v.setBigUint64(8, acc >> 64n, true);
+    return tag;
+  }
+
+  function nonceFor(counter) {
+    const nonce = new Uint8Array(12);
+    new DataView(nonce.buffer).setBigUint64(4, BigInt(counter));
+    return nonce;
+  }
+
+  // ChaCha20-Poly1305 with empty additional data. Returns ciphertext ‖ 16-byte tag.
+  function seal(key, counter, plaintext) {
+    const nonce = nonceFor(counter);
+    const polyKey = chacha20(key, nonce, 0, new Uint8Array(32));
+    const ciphertext = chacha20(key, nonce, 1, plaintext);
+    return concat(ciphertext, poly1305(polyKey, ciphertext));
+  }
+
+  // Returns the plaintext, or null if the message was tampered with or out of order.
+  function open(key, counter, sealed) {
+    if (sealed.length < 16) return null;
+    const nonce = nonceFor(counter);
+    const ciphertext = sealed.subarray(0, sealed.length - 16);
+    const expected = poly1305(chacha20(key, nonce, 0, new Uint8Array(32)), ciphertext);
+    let diff = 0;
+    for (let i = 0; i < 16; i++) diff |= expected[i] ^ sealed[sealed.length - 16 + i];
+    return diff === 0 ? chacha20(key, nonce, 1, ciphertext) : null;
+  }
+
+  const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  function fromHex(hex) {
+    if (!/^([0-9a-f]{2})*$/i.test(hex)) return null;
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return out;
+  }
+
+  // Answers the Mac's "n <nonce>" challenge. Returns the "a …" reply and the session keys.
+  function handshake(code, macNonceHex) {
+    const macNonce = fromHex(macNonceHex);
+    if (!macNonce || macNonce.length !== 16) return null;
+    const phoneNonce = crypto.getRandomValues(new Uint8Array(16));
+    const keys = hkdf(encoder.encode(code), concat(macNonce, phoneNonce), encoder.encode("relay v1"), 96);
+    const proof = hmac(keys.subarray(0, 32), encoder.encode("relay-auth-v1"));
+    return {
+      reply: `a ${toHex(phoneNonce)} ${toHex(proof)}`,
+      sendKey: keys.slice(32, 64),
+      receiveKey: keys.slice(64, 96),
+    };
+  }
+
+  return { sha256, hmac, hkdf, seal, open, handshake, toHex, fromHex };
+})();
+
+if (typeof module !== "undefined") module.exports = RelayCrypto;   // for tools/cryptotest.mjs

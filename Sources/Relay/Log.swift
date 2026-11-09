@@ -12,8 +12,10 @@ enum Log {
         try? fm.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let size = (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0
         if size > 1_000_000 || !fm.fileExists(atPath: fileURL.path) {
-            fm.createFile(atPath: fileURL.path, contents: nil)
+            fm.createFile(atPath: fileURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
         }
+        // Owner-only: the log names devices and addresses on your network.
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         let h = try? FileHandle(forWritingTo: fileURL)
         h?.seekToEndOfFile()
         return h

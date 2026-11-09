@@ -6,7 +6,7 @@ import Foundation
 // 2. With two or more screens: moving the cursor to another screen makes Auto switch to it
 //    (the cursor is put back afterwards).
 let code = CommandLine.arguments[1]
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 func say(_ m: String) async throws { try await t.send(.string(m)) }
 var failures = 0

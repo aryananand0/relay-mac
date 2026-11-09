@@ -20,6 +20,15 @@ final class WebServer {
         "svg": "image/svg+xml",
     ]
 
+    /// The phone page may only run its own scripts and styles, load its own images (and the
+    /// preview frames it decodes itself), and talk to Relay's control port.
+    private static let appPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; "
+        + "img-src 'self' blob:; connect-src ws://*:8766; manifest-src 'self'; base-uri 'none'; "
+        + "form-action 'none'; frame-ancestors 'none'"
+    /// The pairing page (this Mac only) has inline styles and an inline QR image.
+    private static let pairPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+        + "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
     init(port: UInt16, root: URL, queue: DispatchQueue) throws {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
@@ -77,7 +86,8 @@ final class WebServer {
                   let page = pairingPage?() else {
                 return send(connection, status: "404 Not Found", type: "text/plain", body: Data("404".utf8))
             }
-            return send(connection, status: "200 OK", type: "text/html; charset=utf-8", body: page)
+            return send(connection, status: "200 OK", type: "text/html; charset=utf-8", body: page,
+                        policy: WebServer.pairPolicy)
         }
 
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./")
@@ -92,13 +102,18 @@ final class WebServer {
              length: body.count)
     }
 
-    private func send(_ connection: NWConnection, status: String, type: String, body: Data, length: Int? = nil) {
+    private func send(_ connection: NWConnection, status: String, type: String, body: Data, length: Int? = nil,
+                      policy: String = WebServer.appPolicy) {
         let header = """
         HTTP/1.1 \(status)\r
         Content-Type: \(type)\r
         Content-Length: \(length ?? body.count)\r
         Cache-Control: no-store\r
+        Content-Security-Policy: \(policy)\r
         X-Content-Type-Options: nosniff\r
+        X-Frame-Options: DENY\r
+        Referrer-Policy: no-referrer\r
+        Cross-Origin-Resource-Policy: same-origin\r
         Connection: close\r
         \r
 

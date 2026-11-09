@@ -1,7 +1,7 @@
 import Foundation
 // mode "idle": connected phone sitting open (pings every 2 s). mode "move": finger moving at 60 Hz.
 let code = CommandLine.arguments[1], mode = CommandLine.arguments[2], seconds = Double(CommandLine.arguments[3])!
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 try await t.send(.string("a \(code)")); _ = try await t.receive()
 let end = Date().addingTimeInterval(seconds)

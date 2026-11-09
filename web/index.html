@@ -242,12 +242,13 @@
       <h1>Pair with your Mac</h1>
       <p>Enter the code from the Relay pairing page on your Mac.</p>
       <input id="pairing-code" autocomplete="off" autocorrect="off" autocapitalize="characters"
-             spellcheck="false" maxlength="12" placeholder="XXXX XXXX" inputmode="text" aria-label="Pairing code">
+             spellcheck="false" maxlength="16" placeholder="XXXX XXXX XXXX" inputmode="text" aria-label="Pairing code">
       <p id="pairing-error" class="pairing-error" hidden>That code didn't match. Check the code on your Mac and try again.</p>
       <button type="submit">Pair</button>
     </form>
   </div>
 
+  <script src="crypto.js"></script>
   <script src="relay.js"></script>
 </body>
 </html>

@@ -18,7 +18,7 @@ let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
 
 let code = CommandLine.arguments[1]
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 Task {
     try await t.send(.string("a \(code)"))

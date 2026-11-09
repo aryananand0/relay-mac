@@ -36,7 +36,7 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
     Task { @MainActor in
         try await Task.sleep(nanoseconds: 800_000_000)
         guard frontmost() else { print("ABORT: test window is not frontmost; nothing sent"); exit(2) }
-        let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+        let t = RelayClient()
         t.resume()
         try await t.send(.string("a \(code)"))
         _ = try await t.receive()

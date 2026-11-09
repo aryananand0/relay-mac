@@ -3,7 +3,7 @@ import Foundation
 // Turns the displays off through Relay, then sends one small cursor move and checks they wake.
 let code = CommandLine.arguments[1]
 func asleep() -> Bool { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 try await t.send(.string("a \(code)")); _ = try await t.receive()
 print("display asleep before: \(asleep())")

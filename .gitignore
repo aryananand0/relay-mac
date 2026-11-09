@@ -1,4 +1,25 @@
+# Build output
 .build/
 build/
-build.noindex/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# macOS
 .DS_Store
+
+# Never commit secrets or private data
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.p8
+*.key
+*.mobileprovision
+*.log
+pairing-code
+
+# Internal security audit notes (may contain exploit details)
+docs/SECURITY_AUDIT.md

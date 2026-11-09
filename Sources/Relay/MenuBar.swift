@@ -12,6 +12,8 @@ final class MenuBar: NSObject {
     private let pairingURL: URL
     private let onPause: (Bool) -> Void
     private var connected = 0
+    /// Replaces the pairing code (after the user confirms).
+    var onNewPairingCode: (() -> Void)?
     /// Turns off keep-awake and the sleep timer.
     var onCancelPower: (() -> Void)?
     private(set) var paused = UserDefaults.standard.bool(forKey: MenuBar.pausedKey)
@@ -29,6 +31,7 @@ final class MenuBar: NSObject {
         menu.addItem(powerItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Show Pairing Code…", action: #selector(showPairing), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "New Pairing Code…", action: #selector(newPairingCode), keyEquivalent: "").target = self
         pauseItem.target = self
         menu.addItem(pauseItem)
         menu.addItem(.separator())
@@ -70,6 +73,18 @@ final class MenuBar: NSObject {
     }
 
     @objc private func showPairing() { NSWorkspace.shared.open(pairingURL) }
+
+    @objc private func newPairingCode() {
+        let alert = NSAlert()
+        alert.messageText = "Create a new pairing code?"
+        alert.informativeText = "Every iPhone paired with this Mac is disconnected and has to scan the new code. Do this if someone else may know the current code."
+        alert.addButton(withTitle: "New Code")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        onNewPairingCode?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [pairingURL] in NSWorkspace.shared.open(pairingURL) }
+    }
 
     @objc private func togglePause() {
         paused.toggle()

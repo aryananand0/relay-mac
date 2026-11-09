@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token; no job here needs to write anything or use secrets.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Build Relay
+        run: swift build -c release --arch arm64
+      - name: Check the phone page scripts
+        run: |
+          node --check web/relay.js
+          node --check web/crypto.js
+      - name: Phone-side crypto matches Node's crypto
+        run: node tools/cryptotest.mjs
+      - name: Repository checks (secrets, personal paths, files that must not be committed)
+        run: ./scripts/check-repo.sh
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0          # scan the whole history, not just the latest commit
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

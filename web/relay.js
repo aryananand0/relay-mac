@@ -107,6 +107,12 @@ function showOffline(title = OFFLINE_TITLE, detail = OFFLINE_DETAIL) {
   offline.hidden = false;
 }
 
+// Messages are end-to-end encrypted (web/crypto.js): Relay opens with a challenge, this page
+// proves it knows the pairing code without sending it, and from then on every message both
+// ways is sealed with ChaCha20-Poly1305. Anyone else on the Wi-Fi sees only ciphertext.
+let channel = null;   // { sendKey, receiveKey, sendCounter, receiveCounter } once the handshake is sent
+const textEncoder = new TextEncoder(), textDecoder = new TextDecoder();
+
 function connect(immediate) {
   if (!code) { showPairing(false); return; }
   if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
@@ -117,71 +123,95 @@ function connect(immediate) {
   const socket = new WebSocket(`ws://${location.hostname}:${CONTROL_PORT}/`);
   ws = socket;
   authed = false;
+  channel = null;
 
   socket.binaryType = "arraybuffer";
-  socket.onopen = () => socket.send("a " + code);
   socket.onmessage = (ev) => {
-    if (ev.data instanceof ArrayBuffer) { showFrame(ev.data); return; }
-    const data = String(ev.data);
-    if (data.startsWith("B ")) { showMacClipboard(data.slice(2)); return; }
-    const parts = data.split(" ");
-    switch (parts[0]) {
-      case "ok":
-        authed = true;
-        retryDelay = 300;
-        lastPong = performance.now();
-        setStatus("ok", "Connected");
-        ping();
-        send("q power");
-        if (mode === "remote") send("q vol");
-        requestPreview();
-        break;
-      case "no":
-        clearCode();
-        code = "";
-        socket.onclose = null;
-        socket.close();
-        ws = null;
-        setStatus("bad", "Not paired");
-        showPairing(true);
-        break;
-      case "v":
-        showVolume(parts);
-        break;
-      case "W":
-        showPower(Number(parts[1]), Number(parts[2]));
-        break;
-      case "S":
-        showLayout(parts);
-        break;
-      case "C":
-        showCursor(Number(parts[1]), Number(parts[2]));
-        break;
-      case "paused":
-        setStatus("bad", "Paused on your Mac");
-        showOffline("Relay is paused on your Mac", "Turn it back on from the Relay icon in the Mac's menu bar.");
-        break;
-      case "P": {
-        lastPong = performance.now();
-        const rtt = performance.now() - Number(parts[1]);
-        if (Number.isFinite(rtt)) rttText.textContent = `${Math.round(rtt)} ms`;
-        warning.hidden = parts[2] !== "0";
-        break;
+    if (ws !== socket) return;
+    if (typeof ev.data === "string") {
+      // Before pairing only: the challenge, or a refusal.
+      const parts = ev.data.split(" ");
+      if (parts[0] === "n" && !channel) {
+        const hello = RelayCrypto.handshake(code, parts[1] || "");
+        if (!hello) { socket.close(); return; }
+        channel = { sendKey: hello.sendKey, receiveKey: hello.receiveKey, sendCounter: 0, receiveCounter: 0 };
+        socket.send(hello.reply);
+      } else if (parts[0] === "no" || parts[0] === "paused") {
+        handleMessage(socket, ev.data);
       }
+      return;
     }
+    if (!channel) return;
+    const plain = RelayCrypto.open(channel.receiveKey, channel.receiveCounter, new Uint8Array(ev.data));
+    if (!plain) { socket.close(); return; }   // altered or out of order: start over
+    channel.receiveCounter++;
+    if (plain[0] === 0x46) showFrame(plain.slice(1).buffer);                   // "F" + frame
+    else if (plain[0] === 0x54) handleMessage(socket, textDecoder.decode(plain.subarray(1)));   // "T" + text
   };
   socket.onclose = () => {
     if (ws !== socket) return;
     authed = false;
+    channel = null;
     setStatus("bad", "Reconnecting");
     retryTimer = setTimeout(() => connect(false), retryDelay);
     retryDelay = Math.min(retryDelay * 2, 3000);
   };
 }
 
+function handleMessage(socket, data) {
+  if (data.startsWith("B ")) { showMacClipboard(data.slice(2)); return; }
+  const parts = data.split(" ");
+  switch (parts[0]) {
+    case "ok":
+      authed = true;
+      retryDelay = 300;
+      lastPong = performance.now();
+      setStatus("ok", "Connected");
+      ping();
+      send("q power");
+      if (mode === "remote") send("q vol");
+      requestPreview();
+      break;
+    case "no":
+      clearCode();
+      code = "";
+      socket.onclose = null;
+      socket.close();
+      ws = null;
+      channel = null;
+      setStatus("bad", "Not paired");
+      showPairing(true);
+      break;
+    case "v":
+      showVolume(parts);
+      break;
+    case "W":
+      showPower(Number(parts[1]), Number(parts[2]));
+      break;
+    case "S":
+      showLayout(parts);
+      break;
+    case "C":
+      showCursor(Number(parts[1]), Number(parts[2]));
+      break;
+    case "paused":
+      setStatus("bad", "Paused on your Mac");
+      showOffline("Relay is paused on your Mac", "Turn it back on from the Relay icon in the Mac's menu bar.");
+      break;
+    case "P": {
+      lastPong = performance.now();
+      const rtt = performance.now() - Number(parts[1]);
+      if (Number.isFinite(rtt)) rttText.textContent = `${Math.round(rtt)} ms`;
+      warning.hidden = parts[2] !== "0";
+      break;
+    }
+  }
+}
+
 function send(msg) {
-  if (authed && ws && ws.readyState === WebSocket.OPEN) { ws.send(msg); return true; }
-  return false;
+  if (!authed || !channel || !ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(RelayCrypto.seal(channel.sendKey, channel.sendCounter++, textEncoder.encode("T" + msg)));
+  return true;
 }
 
 function ping() { send("p " + performance.now().toFixed(1)); }

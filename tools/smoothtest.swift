@@ -33,7 +33,7 @@ let tapThread = Thread {
 }
 tapThread.start()
 
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 try await t.send(.string("a \(code)")); _ = try await t.receive()
 try await t.send(.string("o smooth \(smooth)")); try await t.send(.string("o reserve \(CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "0")"))

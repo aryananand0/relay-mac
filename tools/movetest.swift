@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 // Moves the cursor in a burst like a real swipe and checks every delta lands.
 let code = CommandLine.arguments[1]
-let t = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:8766/")!)
+let t = RelayClient()
 t.resume()
 try await t.send(.string("a \(code)"))
 guard case .string(let reply) = try await t.receive(), reply == "ok" else { print("auth failed"); exit(1) }

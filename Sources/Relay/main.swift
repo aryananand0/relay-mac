@@ -35,8 +35,12 @@ do {
     exit(1)
 }
 let hostName = (SCDynamicStoreCopyLocalHostName(nil) as String?) ?? "localhost"
-let phoneURL = "http://\(hostName).local:\(webPort)/#k=\(pairing.code)"
-webServer.pairingPage = { PairingPage.html(url: phoneURL, code: pairing.code) }
+// The pairing link carries the code in the URL fragment (#k=…), which browsers never send
+// over the network; the page reads it locally. Built on demand so a new code shows at once.
+webServer.pairingPage = {
+    let code = pairing.code
+    return PairingPage.html(url: "http://\(hostName).local:\(webPort)/#k=\(code)", code: code)
+}
 webServer.start()
 controlServer.start()
 
@@ -46,18 +50,21 @@ if !input.hasPermission {
 }
 
 Log.info("Relay started (pid \(getpid()), web root \(resolveWebRoot().path))")
-Log.info("Pairing code: \(pairing.code)")
-Log.info("Open on iPhone: \(phoneURL)")
+// The pairing code is deliberately never written to the log.
+Log.info("Phone page: http://\(hostName).local:\(webPort)")
 Log.info("QR code to scan: http://localhost:\(webPort)/pair")
-for ip in PeerPolicy.localIPv4Addresses() {
-    Log.info("  or by IP:     http://\(ip):\(webPort)/#k=\(pairing.code)")
-}
 
 // Menu bar app: no Dock icon or windows, just the status item.
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let menuBar = MenuBar(pairingURL: URL(string: "http://localhost:\(webPort)/pair")!) { paused in
     controlServer.setPaused(paused)
+}
+menuBar.onNewPairingCode = {
+    queue.async {
+        pairing.reset()
+        controlServer.disconnectAll()
+    }
 }
 controlServer.onControllersChanged = { count in
     DispatchQueue.main.async { menuBar.setConnected(count) }

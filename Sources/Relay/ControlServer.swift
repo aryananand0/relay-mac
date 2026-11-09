@@ -4,8 +4,13 @@ import SystemConfiguration
 
 /// WebSocket endpoint the iPhone sends input commands to.
 ///
+/// Pairing and encryption (SecureChannel): Relay opens with "n <nonce>"; the phone answers
+/// "a <nonce> <proof>" (→ "no" or "paused" in plaintext on failure). From then on every
+/// message both ways is encrypted; the commands below are what's inside. A phone that hasn't
+/// paired within 10 seconds is disconnected.
+///
 /// Protocol: one space-separated text message per command.
-///   a <code>        authenticate (must be first)      → "ok" | "no" | "paused"
+///                   → "ok" once paired
 ///   m <dx> <dy>     move cursor by points (already accelerated by the client)
 ///   s <dx> <dy>     scroll by pixels, wheel convention (positive = content moves down/right)
 ///   c <btn> <n>     click button (0 left, 1 right) with click count n
@@ -135,6 +140,14 @@ final class ControlServer {
         queue.asyncAfter(deadline: .now() + 0.08, execute: settle)
     }
 
+    /// After a new pairing code: every phone has to pair again. Thread-safe.
+    func disconnectAll() {
+        queue.async { [self] in
+            stopPreview()
+            for session in sessions.values { session.connection.cancel() }
+        }
+    }
+
     /// Sends a message to every paired phone. Control queue only.
     func broadcast(_ message: String) {
         for session in sessions.values where session.authenticated { session.send(message) }
@@ -191,6 +204,11 @@ final class ControlServer {
         let peer: String
         private(set) var authenticated = false
         private unowned let server: ControlServer
+        private let macNonce = SecureChannel.randomNonce()
+        /// Set once paired. Guarded by sendLock for sending (frames come from another queue);
+        /// opening only happens on the control queue.
+        private var channel: SecureChannel?
+        private let sendLock = NSLock()
 
         init(connection: NWConnection, server: ControlServer) {
             self.connection = connection
@@ -207,7 +225,13 @@ final class ControlServer {
                 }
             }
             connection.start(queue: queue)
+            sendPlain("n \(macNonce.hex)")
             receive()
+            // Don't let unpaired connections linger.
+            queue.asyncAfter(deadline: .now() + 10) { [weak self] in
+                guard let self, !self.authenticated else { return }
+                self.connection.cancel()
+            }
         }
 
         private func receive() {
@@ -223,35 +247,56 @@ final class ControlServer {
                     self.connection.cancel()
                     return
                 }
-                if let data, !data.isEmpty, meta?.opcode == .text {
-                    self.handle(String(decoding: data, as: UTF8.self))
+                if let data, !data.isEmpty {
+                    if !self.authenticated, meta?.opcode == .text {
+                        self.pair(String(decoding: data, as: UTF8.self))
+                    } else if self.authenticated, meta?.opcode == .binary,
+                              let plain = self.sendLock.withLock({ self.channel?.open(data) }),
+                              plain.first == UInt8(ascii: "T") {
+                        self.handle(String(decoding: plain.dropFirst(), as: UTF8.self))
+                    } else {
+                        // Anything else (plaintext after pairing, a forged, replayed or
+                        // reordered message) ends the connection.
+                        Log.info("control: \(self.peer) sent an invalid message; disconnecting")
+                        self.connection.cancel()
+                        return
+                    }
                 }
                 self.receive()
             }
         }
 
+        /// "a <phone nonce> <proof>": the phone proves it knows the pairing code.
+        private func pair(_ text: String) {
+            if server.paused {
+                close(saying: "paused")
+                return
+            }
+            let parts = text.split(separator: " ")
+            var accepted: SecureChannel?
+            if parts.count == 3, parts[0] == "a", let phoneNonce = Data(hex: parts[1]), let proof = Data(hex: parts[2]) {
+                _ = server.pairing.authenticate(peer: peer) { code in
+                    accepted = SecureChannel.accept(code: code, macNonce: macNonce, phoneNonce: phoneNonce, proof: proof)
+                    return accepted != nil
+                }
+            }
+            guard let accepted else {
+                Log.info("control: \(peer) failed pairing")
+                sendPlain("no")
+                // Short delay slows guessing and lets "no" reach the client.
+                server.queue.asyncAfter(deadline: .now() + 0.5) { [connection] in connection.cancel() }
+                return
+            }
+            sendLock.withLock { channel = accepted }
+            authenticated = true
+            server.controllerCountChanged(by: 1)
+            send("ok")
+            Log.info("control: \(peer) paired (accessibility: \(server.input.hasPermission))")
+        }
+
         private func handle(_ text: String) {
             let parts = text.split(separator: " ")
             guard let command = parts.first else { return }
-
-            guard authenticated else {
-                if server.paused {
-                    close(saying: "paused")
-                    return
-                }
-                if command == "a", parts.count >= 2, server.pairing.verify(String(parts[1]), peer: peer) {
-                    authenticated = true
-                    server.controllerCountChanged(by: 1)
-                    send("ok")
-                    Log.info("control: \(peer) paired (accessibility: \(server.input.hasPermission))")
-                } else {
-                    Log.info("control: \(peer) failed pairing")
-                    send("no")
-                    // Short delay slows guessing and lets "no" reach the client.
-                    server.queue.asyncAfter(deadline: .now() + 0.5) { [connection] in connection.cancel() }
-                }
-                return
-            }
 
             // Clicks, scrolling and typing change the screen: show the result promptly. Plain
             // cursor movement doesn't need new frames (its position is sent separately).
@@ -371,14 +416,27 @@ final class ControlServer {
             server.queue.asyncAfter(deadline: .now() + 0.3) { [connection] in connection.cancel() }
         }
 
-        func sendData(_ data: Data) {
-            let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
-            let context = NWConnection.ContentContext(identifier: "frame", metadata: [meta])
-            connection.send(content: data, contentContext: context, isComplete: true,
-                            completion: .contentProcessed { _ in })
+        /// A screen-preview frame (encrypted).
+        func sendData(_ data: Data) { sendSealed(Data("F".utf8) + data) }
+
+        /// A command or status message: encrypted once paired, plaintext before ("no", "paused").
+        func send(_ text: String) {
+            if authenticated { sendSealed(Data("T".utf8) + Data(text.utf8)) } else { sendPlain(text) }
         }
 
-        func send(_ text: String) {
+        /// Seals and sends under one lock, so message counters and send order always agree
+        /// even when frames are sent from the preview queue.
+        private func sendSealed(_ plain: Data) {
+            sendLock.withLock {
+                guard let sealed = channel?.seal(plain) else { return }
+                let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
+                let context = NWConnection.ContentContext(identifier: "sealed", metadata: [meta])
+                connection.send(content: sealed, contentContext: context, isComplete: true,
+                                completion: .contentProcessed { _ in })
+            }
+        }
+
+        private func sendPlain(_ text: String) {
             let meta = NWProtocolWebSocket.Metadata(opcode: .text)
             let context = NWConnection.ContentContext(identifier: "text", metadata: [meta])
             connection.send(content: Data(text.utf8), contentContext: context, isComplete: true,
