@@ -199,7 +199,7 @@ You can then remove Relay from System Settings › Privacy & Security › Access
 Relay can control your Mac, so it is careful about who it talks to and what leaves your devices.
 
 - **Local only:** Relay accepts connections only from devices on your local network (private, link-local or same-subnet addresses). It never contacts the internet and has no accounts, analytics or telemetry. It doesn't advertise itself on the network either.
-- **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute, and more than 20 wrong attempts a minute from anywhere pause pairing.
+- **Pairing:** a phone must prove it knows the 12-character pairing code before Relay accepts anything. Five wrong attempts lock that device out for a minute. More than 20 wrong attempts a minute from anywhere pause pairing for every device that guessed wrong, while a phone with the right code still gets in, so a stranger can't lock you out.
 - **HTTPS:** the phone page and the control connection use TLS 1.2 or later, with a certificate from a small certificate authority Relay creates on your Mac:
   - Its private keys live in your login Keychain and can't be exported.
   - The authority can only vouch for web servers on your own network: `.local` names, `localhost` and private addresses (Name Constraints and Extended Key Usage). Even if its key were stolen, it couldn't be used to impersonate real websites, sign email or vouch for apps on your iPhone.
@@ -208,7 +208,7 @@ Relay can control your Mac, so it is careful about who it talks to and what leav
 - **Browser protections:**
   - Only Relay's own page may open the control connection, so other websites can't reach it.
   - The page runs under a strict Content Security Policy.
-  - The pairing page is shown only on the Mac itself.
+  - The pairing page is shown only on the Mac itself, and only to your user account: it needs a secret token that changes every launch, so other accounts on a shared Mac can't read the code.
 - **Permissions:**
   - **Accessibility** to move the cursor and type.
   - **Motion & Orientation** on the iPhone, only if you use the air mouse. Motion readings stay on the phone; only cursor movements are sent.

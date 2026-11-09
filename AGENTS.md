@@ -4,7 +4,7 @@ Relay is a public, open-source app that lets a phone control a Mac: cursor, keyb
 
 ## The project in one minute
 
-- **Mac app:** `Sources/Relay/` (Swift, no dependencies). It serves `web/` over HTTPS on port 8443 and takes commands over a secure WebSocket on 8766. Plain HTTP on 8765 serves only the setup page and certificate profile (and `/pair` to the Mac itself). `TLSIdentity.swift` manages the name-constrained local CA and server certificate in the Keychain.
+- **Mac app:** `Sources/Relay/` (Swift, no dependencies). It serves `web/` over HTTPS on port 8443 and takes commands over a secure WebSocket on 8766. Plain HTTP on 8765 serves only the setup page and certificate profile (and `/pair` to the Mac itself, with a per-launch token). `TLSIdentity.swift` manages the name-constrained local CA and server certificate in the Keychain.
 - **Phone page:** `web/` is plain HTML/CSS/JS. `web/crypto.js` is the phone's side of the encryption.
 - **Security model:** see SECURITY.md and the README's "Privacy and security". In short:
   - local-network peers only

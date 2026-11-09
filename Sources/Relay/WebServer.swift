@@ -17,6 +17,8 @@ final class WebServer {
     private let role: Role
     /// Served at /pair, to this Mac only (setup role).
     var pairingPage: (() -> Data)?
+    /// Required as /pair?t=<token>, so only this user's processes can open the pairing page.
+    var pairingToken: String?
     /// Served at / and /setup (setup role).
     var setupPage: (() -> Data)?
     /// Served at /Relay.mobileconfig (setup role).
@@ -85,13 +87,21 @@ final class WebServer {
         }
     }
 
+    static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        guard x.count == y.count else { return false }
+        return zip(x, y).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+
     private func respond(_ connection: NWConnection, head: String) {
         let requestLine = head.split(separator: "\r\n", maxSplits: 1).first ?? ""
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" || parts[0] == "HEAD" else {
             return send(connection, status: "405 Method Not Allowed", type: "text/plain", body: Data("405".utf8))
         }
-        var path = String(parts[1].split(separator: "?", maxSplits: 1).first ?? "/")
+        let target = parts[1].split(separator: "?", maxSplits: 1)
+        var path = String(target.first ?? "/")
+        let query = target.count > 1 ? String(target[1]) : ""
         let notFound = { self.send(connection, status: "404 Not Found", type: "text/plain", body: Data("404".utf8)) }
 
         if role == .app {
@@ -122,7 +132,9 @@ final class WebServer {
             let host = head.split(separator: "\r\n").first { $0.lowercased().hasPrefix("host:") }?
                 .dropFirst(5).trimmingCharacters(in: .whitespaces).lowercased() ?? ""
             let localHosts = ["localhost:\(port)", "127.0.0.1:\(port)", "[::1]:\(port)"]
+            let token = query.split(separator: "&").first { $0.hasPrefix("t=") }.map { String($0.dropFirst(2)) } ?? ""
             guard PeerPolicy.isLoopback(connection.endpoint), localHosts.contains(host),
+                  let expected = pairingToken, WebServer.constantTimeEqual(token, expected),
                   let page = pairingPage?() else {
                 return send(connection, status: "404 Not Found", type: "text/plain", body: Data("404".utf8))
             }

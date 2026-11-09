@@ -143,8 +143,15 @@ check(profile.contains("application/x-apple-aspen-config") && profile.contains("
       "the certificate profile is offered for setup")
 check(curl(["-H", "Host: evil.example:8765", "http://127.0.0.1:8765/pair"]).hasPrefix("HTTP/1.1 404"),
       "pairing page refused for a foreign Host header (DNS rebinding)")
-let pair = curl(["http://localhost:8765/pair"])
-check(pair.hasPrefix("HTTP/1.1 200") && pair.contains("frame-ancestors 'none'"), "pairing page served to this Mac")
+let tokenURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/Relay/pairing-page-token")
+let pageToken = ((try? String(contentsOf: tokenURL, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+check(curl(["http://localhost:8765/pair"]).hasPrefix("HTTP/1.1 404"), "pairing page refused without its token (other accounts on this Mac)")
+check(curl(["http://localhost:8765/pair?t=" + String(repeating: "0", count: 32)]).hasPrefix("HTTP/1.1 404"), "pairing page refused with a wrong token")
+check(((try? FileManager.default.attributesOfItem(atPath: tokenURL.path)[.posixPermissions] as? Int) ?? 0) == 0o600,
+      "the pairing page token is readable only by its owner")
+let pair = curl(["http://localhost:8765/pair?t=" + pageToken])
+check(pageToken.count == 32 && pair.hasPrefix("HTTP/1.1 200") && pair.contains("frame-ancestors 'none'"), "pairing page served to this Mac with its token")
 check(curl(["-X", "POST", "http://127.0.0.1:8765/"]).hasPrefix("HTTP/1.1 405"), "only GET and HEAD are accepted")
 
 // 7b. Relay's certificate authority can only vouch for local web servers.

@@ -4,7 +4,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// The page shown on the Mac (http://localhost:8765/pair) with two QR codes: one to set the
+/// The page shown on the Mac (http://localhost:8765/pair?t=<token>) with two QR codes: one to set the
 /// iPhone up for HTTPS (once), one that opens Relay securely and pairs it. Only served to this
 /// Mac itself, never to the network.
 enum PairingPage {

@@ -54,6 +54,7 @@ setupServer.pairingPage = {
     return PairingPage.html(setupURL: setupURL, appURL: "\(appURL)#k=\(code)", code: code,
                             fingerprint: tlsIdentity.caFingerprint)
 }
+setupServer.pairingToken = pairing.pageToken
 setupServer.setupPage = { SetupPage.html(appPort: appPort) }
 setupServer.profile = tlsIdentity.profile
 setupServer.start()
@@ -68,12 +69,12 @@ if !input.hasPermission {
 Log.info("Relay started (pid \(getpid()), web root \(resolveWebRoot().path))")
 // The pairing code is deliberately never written to the log.
 Log.info("Phone page: \(appURL) (setup: \(setupURL))")
-Log.info("QR code to scan: http://localhost:\(webPort)/pair")
+Log.info("Pairing page: Relay menu › Show Pairing Code…, or ./scripts/pair.sh")
 
 // Menu bar app: no Dock icon or windows, just the status item.
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let menuBar = MenuBar(pairingURL: URL(string: "http://localhost:\(webPort)/pair")!) { paused in
+let menuBar = MenuBar(pairingURL: URL(string: "http://localhost:\(webPort)/pair?t=\(pairing.pageToken)")!) { paused in
     controlServer.setPaused(paused)
 }
 menuBar.certificateProfile = TLSIdentity.profileURL

@@ -12,7 +12,9 @@ import Foundation
 ///   traffic gives no way to test guesses, and even an attacker in the middle of the network
 ///   pays 600 000 hashes per guess.
 /// - **Guess limits:** five wrong attempts lock an address (IPv6: its /64) out for a minute,
-///   and more than 20 wrong attempts a minute from anywhere pause all pairing for a minute.
+///   and more than 20 wrong attempts a minute from anywhere pause pairing for a minute for
+///   every address that has guessed wrong lately. Addresses with no recent failures (your own
+///   phone) still get through, so a stranger spamming guesses can't lock you out.
 final class Pairing {
     static let length = 12
     static let iterations: UInt32 = 600_000
@@ -25,11 +27,17 @@ final class Pairing {
         .appendingPathComponent("Library/Application Support/Relay")
     private static let codeURL = dir.appendingPathComponent("pairing-code")
     private static let saltURL = dir.appendingPathComponent("pairing-salt")
+    static let pageTokenURL = dir.appendingPathComponent("pairing-page-token")
+
+    /// A random token, new each launch, that the pairing page on this Mac requires
+    /// (/pair?t=…). Only Relay and processes of this user can read it (scripts/pair.sh uses
+    /// it), so other accounts on the Mac can't fetch the code from localhost.
+    let pageToken = SecureChannel.randomNonce().hex
 
     private var current: String
     private var saltBytes: Data
     private var stretchedKey: Data
-    private var failures: [String: (count: Int, lockedUntil: Date)] = [:]
+    private var failures: [String: (count: Int, lockedUntil: Date, lastFailedAt: Date)] = [:]
     private var recentFailures: [Date] = []
     private var globalLockUntil = Date.distantPast
     private let lock = NSLock()
@@ -53,6 +61,7 @@ final class Pairing {
             Pairing.save(current, salt: saltBytes)
         }
         stretchedKey = Pairing.stretch(current, salt: saltBytes)
+        Pairing.writePrivate(pageToken, to: Pairing.pageTokenURL)
         for url in [Pairing.codeURL, Pairing.saltURL] {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
@@ -79,28 +88,34 @@ final class Pairing {
         lock.lock()
         defer { lock.unlock() }
         let now = Date()
-        if globalLockUntil > now { return .lockedOut }
-        var entry = failures[peer] ?? (0, .distantPast)
+        var entry = failures[peer] ?? (0, .distantPast, .distantPast)
         if entry.lockedUntil > now { return .lockedOut }
+        // During a pause, only addresses that guessed wrong in the last minute are turned away.
+        if globalLockUntil > now && now.timeIntervalSince(entry.lastFailedAt) < Pairing.lockoutSeconds {
+            return .lockedOut
+        }
         if check(stretchedKey) {
             failures[peer] = nil
             return .accepted
         }
         entry.count += 1
+        entry.lastFailedAt = now
         if entry.count >= Pairing.maxFailures {
-            entry = (0, now.addingTimeInterval(Pairing.lockoutSeconds))
+            entry = (0, now.addingTimeInterval(Pairing.lockoutSeconds), now)
             Log.info("pairing: \(peer) locked out for \(Int(Pairing.lockoutSeconds))s")
         }
         failures[peer] = entry
         // A cap across all addresses, so changing address doesn't buy more guesses.
         recentFailures = recentFailures.filter { now.timeIntervalSince($0) < 60 } + [now]
-        if recentFailures.count > Pairing.globalMaxFailures {
+        if recentFailures.count > Pairing.globalMaxFailures && globalLockUntil <= now {
             globalLockUntil = now.addingTimeInterval(Pairing.lockoutSeconds)
             recentFailures = []
-            Log.info("pairing: too many wrong attempts; pairing paused for \(Int(Pairing.lockoutSeconds))s")
+            Log.info("pairing: too many wrong attempts; pairing paused for \(Int(Pairing.lockoutSeconds))s for addresses that guessed wrong")
         }
         // Bound memory without ever forgetting an address that's locked out.
-        if failures.count > 1024 { failures = failures.filter { $0.value.lockedUntil > now } }
+        if failures.count > 1024 {
+            failures = failures.filter { $0.value.lockedUntil > now || now.timeIntervalSince($0.value.lastFailedAt) < Pairing.lockoutSeconds }
+        }
         return .wrong
     }
 
@@ -137,11 +152,15 @@ final class Pairing {
     private static func save(_ code: String, salt: Data) {
         let fm = FileManager.default
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        for (url, text) in [(codeURL, code), (saltURL, salt.hex)] {
-            // Create with owner-only permissions before writing, so it's never world-readable.
-            fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
-            try? Data(text.utf8).write(to: url)
-            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        }
+        for (url, text) in [(codeURL, code), (saltURL, salt.hex)] { writePrivate(text, to: url) }
+    }
+
+    /// Creates the file with owner-only permissions before writing, so it's never world-readable.
+    private static func writePrivate(_ text: String, to url: URL) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try? Data(text.utf8).write(to: url)
     }
 }
