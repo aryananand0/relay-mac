@@ -253,3 +253,7 @@ Let it run without touching the Mac.
 ## Contributing
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, tests and conventions; please report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Relay is released under the [MIT License](LICENSE).
